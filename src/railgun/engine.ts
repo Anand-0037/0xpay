@@ -4,6 +4,7 @@ import type { SnarkJSGroth16 } from '@railgun-community/wallet'
 import { APP_RPC_URL, type PrivateRpc } from '../rpc'
 import { bindEthersToPrivateRoute } from '../rpc/ethers-transport'
 import { createBrowserArtifactStore } from './artifact-store'
+import { checkSepoliaPoi, POI_NODE_URL } from './poi'
 
 let startPromise: Promise<{ shieldFeeBasisPoints: bigint; unshieldFeeBasisPoints: bigint }> | undefined
 
@@ -17,6 +18,7 @@ export function startSepoliaEngine(route: PrivateRpc) {
 
 async function initialize(route: PrivateRpc) {
   bindEthersToPrivateRoute(route)
+  await checkSepoliaPoi()
   ;(globalThis as typeof globalThis & { Buffer?: typeof Buffer }).Buffer = Buffer
   const [{ startRailgunEngine, loadProvider, getProver }, { NetworkName }, { groth16 }] = await Promise.all([
     import('@railgun-community/wallet'),
@@ -26,7 +28,7 @@ async function initialize(route: PrivateRpc) {
   const artifactStore = await createBrowserArtifactStore()
   await startRailgunEngine(
     '0xpay', new Level('0xpay-railgun-engine'), false, artifactStore,
-    false, false, ['https://ppoi.fdi.network'],
+    false, false, [POI_NODE_URL],
   )
   // The SDK's older declaration does not match snarkjs's optional-input declaration.
   getProver().setSnarkJSGroth16(groth16 as unknown as SnarkJSGroth16)
