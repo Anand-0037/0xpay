@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { PrivateRpc } from './rpc'
+import { PrivateRpc, type RouteStats } from './rpc'
 import './App.css'
 
 type RouteState =
   | { status: 'idle' | 'connecting' }
-  | { status: 'ready'; blockNumber: number }
-  | { status: 'failed'; message: string }
+  | { status: 'ready'; blockNumber: number; stats: RouteStats }
+  | { status: 'failed'; message: string; stats?: RouteStats }
 
 function App() {
   const [route, setRoute] = useState<RouteState>({ status: 'idle' })
@@ -20,12 +20,12 @@ function App() {
       rpc = new PrivateRpc()
       rpcRef.current = rpc
       const { blockNumber } = await rpc.connect()
-      if (rpcRef.current === rpc) setRoute({ status: 'ready', blockNumber })
+      if (rpcRef.current === rpc) setRoute({ status: 'ready', blockNumber, stats: rpc.stats })
     } catch (error) {
       if (rpcRef.current === rpc || rpc === null) {
         rpc?.close()
         rpcRef.current = null
-        setRoute({ status: 'failed', message: error instanceof Error ? error.message : 'Unknown connection error' })
+        setRoute({ status: 'failed', message: error instanceof Error ? error.message : 'Unknown connection error', stats: rpc?.stats })
       }
     }
   }
@@ -51,6 +51,7 @@ function App() {
       </div>
 
       <section className="readiness" aria-labelledby="readiness-heading"><div><h2 id="readiness-heading">Payment readiness</h2><p>Connect the private read route first. Wallet funding, shielding and sending are the next build steps.</p></div><button type="button" onClick={connectRoute} disabled={route.status === 'connecting'}>{route.status === 'connecting' ? 'Connecting…' : route.status === 'ready' ? 'Reconnect read route' : 'Connect read route'}</button>
+        {'stats' in route && route.stats && <p className="route-stats" aria-live="polite">App reads: {route.stats.completed} of {route.stats.attempted} completed via Anon-RPC worker. {route.stats.failed} failed. Bootstrap: {route.stats.bootstrapReads} direct specifier reads. SDK reads are not connected yet.</p>}
         <div className="stages"><div className={route.status === 'ready' ? 'stage ready' : 'stage'}><span>01</span><div><strong>Private RPC read</strong><small>{route.status === 'ready' ? 'Chain ID and block read through Nym' : 'Not verified in this session'}</small></div></div><div className="stage"><span>02</span><div><strong>Wallet synced</strong><small>Not available yet</small></div></div><div className="stage"><span>03</span><div><strong>Shielded funds</strong><small>Not available yet</small></div></div><div className="stage"><span>04</span><div><strong>Ready to send</strong><small>Not available yet</small></div></div></div>
         {route.status === 'failed' && <p className="route-error" role="alert">Read route failed: {route.message}. No direct RPC retry was made for the app read.</p>}
       </section>
