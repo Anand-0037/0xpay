@@ -8,6 +8,9 @@ const READ_TIMEOUT_MS = 60_000
 let nextId = 1
 
 export type RouteStats = Readonly<{ attempted: number; completed: number; failed: number; bootstrapReads: number }>
+export type RouteStatus = 'connecting' | 'ready' | 'degraded' | 'failed' | 'closed'
+type Worker = { ready: Promise<unknown>; fetch: (url: string, init: RequestInit) => Promise<Response>; close: () => void }
+type WorkerFactory = (onBootstrap: () => void) => Worker
 
 async function bootstrapRequest({ method, params }: { method: string; params?: unknown[] }) {
   const call = params?.[0]
@@ -27,42 +30,70 @@ async function bootstrapRequest({ method, params }: { method: string; params?: u
 }
 
 export class PrivateRpc {
-  private worker: AnonRpcWorker
+  private readonly workerFactory: WorkerFactory
+  private worker: Worker
+  private generation = 0
+  private statusValue: RouteStatus = 'connecting'
   private attempted = 0
   private completed = 0
   private failed = 0
   private bootstrapReads = 0
-  constructor() {
-    this.worker = new AnonRpcWorker({ address: NYM_SPECIFIER, preExisting: { rpcProvider: { request: async (payload: { method: string; params?: unknown[] }) => {
+  constructor(workerFactory: WorkerFactory = (onBootstrap) => new AnonRpcWorker({
+    address: NYM_SPECIFIER, preExisting: { rpcProvider: { request: async (payload: { method: string; params?: unknown[] }) => {
       const result = await bootstrapRequest(payload)
-      this.bootstrapReads += 1
+      onBootstrap()
       return result
-    } } } })
+    } } },
+  }) as Worker) {
+    this.workerFactory = workerFactory
+    this.worker = workerFactory(() => { this.bootstrapReads += 1 })
   }
+  get status(): RouteStatus { return this.statusValue }
   async connect() {
+    if (this.statusValue === 'closed') throw new Error('Private RPC route is closed')
+    if (this.statusValue === 'degraded' || this.statusValue === 'failed') throw new Error('Private RPC route needs reconnecting')
+    const generation = this.generation
+    this.statusValue = 'connecting'
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       await Promise.race([
         this.worker.ready,
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Nym connection timed out')), 30_000) }),
       ])
+      const chainId = await this.readHex('eth_chainId')
+      if (chainId.toLowerCase() !== '0xaa36a7') throw new Error(`Unexpected chain ${chainId}`)
+      const blockNumber = Number.parseInt(await this.readHex('eth_blockNumber'), 16)
+      if (generation !== this.generation) throw new Error('Private RPC connection was replaced')
+      this.statusValue = 'ready'
+      return { chainId, blockNumber }
+    } catch (error) {
+      if (generation === this.generation) this.statusValue = 'failed'
+      throw error
     } finally { if (timer) clearTimeout(timer) }
-    const chainId = await this.readHex('eth_chainId')
-    if (chainId.toLowerCase() !== '0xaa36a7') throw new Error(`Unexpected chain ${chainId}`)
-    return { chainId, blockNumber: Number.parseInt(await this.readHex('eth_blockNumber'), 16) }
+  }
+  async reconnect() {
+    if (this.statusValue === 'closed') throw new Error('Private RPC route is closed')
+    this.generation += 1
+    this.worker.close()
+    this.worker = this.workerFactory(() => { this.bootstrapReads += 1 })
+    this.statusValue = 'connecting'
+    return this.connect()
   }
   get stats(): RouteStats {
     return { attempted: this.attempted, completed: this.completed, failed: this.failed,
       bootstrapReads: this.bootstrapReads }
   }
   async fetchRpc(body: string | Uint8Array): Promise<Response> {
+    if (this.statusValue !== 'ready' && this.statusValue !== 'connecting') throw new Error('Private RPC route needs reconnecting')
+    const generation = this.generation
+    const worker = this.worker
     this.attempted += 1
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
       const response = await Promise.race([
         (async () => {
-          const result = await this.worker.fetch(APP_RPC_URL, {
+          const result = await worker.fetch(APP_RPC_URL, {
             method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
             body: typeof body === 'string' ? body : new Uint8Array(body).buffer,
           })
@@ -73,12 +104,13 @@ export class PrivateRpc {
           timer = setTimeout(() => { controller.abort(); reject(new Error('Private RPC read timed out')) }, READ_TIMEOUT_MS)
         }),
       ])
+      if (generation !== this.generation) throw new Error('Private RPC response came from a replaced route')
       if (!response.ok) throw new Error(`Private RPC returned HTTP ${response.status}`)
       this.completed += 1
       return response
     } catch (error) {
       this.failed += 1
-      this.worker.close()
+      if (generation === this.generation) this.statusValue = 'degraded'
       throw error
     } finally {
       if (timer) clearTimeout(timer)
@@ -94,5 +126,10 @@ export class PrivateRpc {
       !/^0x[0-9a-f]+$/i.test(payload.result)) throw new Error(`Private RPC did not return a valid ${method} response`)
     return payload.result
   }
-  close() { this.worker.close() }
+  close() {
+    if (this.statusValue === 'closed') return
+    this.generation += 1
+    this.statusValue = 'closed'
+    this.worker.close()
+  }
 }
