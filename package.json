@@ -13,6 +13,7 @@
     "@anon-rpc/browser-harness": "^0.4.0",
     "@railgun-community/shared-models": "8.0.1",
     "@railgun-community/wallet": "10.9.0",
+    "buffer": "6.0.3",
     "ethers": "6.14.3",
     "level-js": "6.1.0",
     "react": "^19.3.1",
@@ -20,12 +21,15 @@
     "snarkjs": "0.7.6"
   },
   "devDependencies": {
+    "@types/level-js": "4.0.5",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/snarkjs": "0.7.9",
     "@vitejs/plugin-react": "^6.1.2",
     "oxlint": "^1.90.0",
     "typescript": "~7.0.2",
-    "vite": "^8.3.6"
+    "vite": "^8.3.6",
+    "vite-plugin-node-polyfills": "0.28.0"
   }
 }
