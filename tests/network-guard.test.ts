@@ -32,15 +32,21 @@ test('approved bundle URL must match exactly and use GET', () => {
 test('guard never sends a direct app RPC request', async () => {
   const oldWindow = globalThis.window
   const oldFetch = globalThis.fetch
-  let calls = 0
-  Object.assign(globalThis, { window: { location: new URL(origin) }, fetch: async () => { calls += 1; return new Response('ok') } })
+  const calls: Array<RequestInit | undefined> = []
+  Object.assign(globalThis, { window: { location: new URL(origin) }, fetch: async (_input: RequestInfo | URL, init?: RequestInit) => { calls.push(init); return new Response('ok') } })
   try {
     installNetworkGuard()
     await assert.rejects(fetch(rpc, { method: 'POST', body: '{}' }), /blocked/)
-    assert.equal(calls, 0)
+    assert.equal(calls.length, 0)
     assert.equal(trafficSnapshot().recent[0].host, 'ethereum-sepolia-rpc.publicnode.com')
     assert.equal(trafficSnapshot().recent[0].kind, 'blocked')
+    const bundle = 'https://worker.example/bundle.js'
+    setWorkerBundleResolvers([bundle])
+    await fetch(bundle)
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0]?.redirect, 'error')
   } finally {
+    setWorkerBundleResolvers([])
     Object.assign(globalThis, { window: oldWindow, fetch: oldFetch })
   }
 })

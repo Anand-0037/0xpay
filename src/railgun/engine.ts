@@ -7,7 +7,8 @@ import { createBrowserArtifactStore } from './artifact-store'
 import { checkSepoliaPoi, POI_NODE_URL } from './poi'
 
 let startPromise: Promise<{ shieldFeeBasisPoints: bigint; unshieldFeeBasisPoints: bigint }> | undefined
-const PROVIDER_TIMEOUT_MS = 60_000
+// The SDK's third loadProvider argument is its event polling interval, not a timeout.
+const PROVIDER_POLL_INTERVAL_MS = 15_000
 
 export function startSepoliaEngine(route: PrivateRpc) {
   startPromise ??= initialize(route).catch((error) => {
@@ -36,7 +37,7 @@ async function initialize(route: PrivateRpc) {
   const { feesSerialized } = await loadProvider({
     chainId: 11155111,
     providers: [{ provider: APP_RPC_URL, priority: 1, weight: 2 }],
-  }, NetworkName.EthereumSepolia, PROVIDER_TIMEOUT_MS)
+  }, NetworkName.EthereumSepolia, PROVIDER_POLL_INTERVAL_MS)
   return {
     shieldFeeBasisPoints: BigInt(feesSerialized.shieldFeeV2),
     unshieldFeeBasisPoints: BigInt(feesSerialized.unshieldFeeV2),

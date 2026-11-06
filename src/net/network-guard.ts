@@ -78,7 +78,8 @@ export function installNetworkGuard() {
       throw new Error(`Network guard blocked ${host}`)
     }
     try {
-      const response = await originalFetch(input, init)
+      // Do not let an approved destination forward a page request to an unapproved host.
+      const response = await originalFetch(input, { ...init, redirect: 'error' })
       record(kind, host, response.ok ? 'sent' : 'failed')
       return response
     } catch (error) { record(kind, host, 'failed'); throw error }
