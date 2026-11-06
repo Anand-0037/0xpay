@@ -79,6 +79,7 @@ export function ConnectionDetails({ open, route, traffic, onClose, onReconnect, 
       <p id="connection-explanation">Your wallet’s blockchain requests use {networkLabel}. If the connection fails, chain requests stop. Unlock and encrypted backup remain available offline.</p>
       {(route.status === 'failed' || route.status === 'disconnected') && <><p>Reconnect for balances and transactions.</p><button type="button" onClick={onReconnect}>Reconnect</button></>}
       {(route.status === 'failed' || route.status === 'disconnected') && route.message && <p className="connection-coverage" role="status">{route.message}</p>}
+      {route.status === 'failed' && privacyNetwork === 'nox' && onNetworkChange && <button type="button" onClick={() => onNetworkChange('nym')}>Try Nym instead</button>}
       <details style={{ marginTop: 28 }}>
       <summary>Technical details</summary>
       {route.message && route.status === 'connecting' && <p className="connection-coverage">{route.message}</p>}
@@ -95,7 +96,7 @@ export function ConnectionDetails({ open, route, traffic, onClose, onReconnect, 
       <details><summary>RPC methods observed</summary><ul>{methods.map(([method, count]) =>
         <li key={method}><code>{method}</code>: {count.completed}/{count.attempted} transport replies · {count.failed} failed</li>
       )}</ul><p>Calls inside a batch are counted separately. A transport reply does not establish RPC success or transaction settlement. No addresses or request contents are retained here.</p></details>
-      <p className="connection-coverage">The counters record requests observed through the worker; a broadcast is counted only when attempted. Worker bootstrap and proof artifact downloads are outside routed RPC. This panel counts page fetch and XHR, not worker internals or browser-native loads. A successful request alone does not prove anonymity.</p>
+      <p className="connection-coverage">The counters record requests observed through the worker; a broadcast is counted only when attempted. Worker bootstrap and proof artifact downloads are outside routed RPC. This panel counts page fetch and XHR, not worker internals or browser-native loads. The RPC can correlate same-session requests by their contents or timing. A successful request alone does not prove anonymity.</p>
       <div className="traffic-recent"><h3>Recent page destinations</h3><ul>{traffic.recent.map((entry, index) => <li key={`${index}-${entry.host}`}><span>{entry.kind}</span><code>{entry.host}</code><span>{entry.outcome}</span></li>)}</ul></div>
       {route.status === 'ready' && <button type="button" onClick={onDisconnect}>Disconnect private route</button>}
       </details>

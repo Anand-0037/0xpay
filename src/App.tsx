@@ -5,6 +5,10 @@ import { ConnectionDetails } from './ui/ConnectionDetails.tsx'
 import { WalletPanel } from './wallet/WalletPanel.tsx'
 import type { WalletSession } from './wallet/lifecycle.ts'
 import { createPayApi } from './pool/api.ts'
+import { config } from './pool/index.ts'
+import { rpc as jsonRpc } from './pool/network.ts'
+import { privateTransport } from './pool/transport.ts'
+import { PrivateInspector } from './inspector/PrivateInspector.tsx'
 import { trafficSnapshot } from './net/network-guard.ts'
 import brandLogo from './assets/0xpay-logo.png'
 import './App.css'
@@ -19,8 +23,11 @@ export default function App() {
   const [wallet, setWallet] = useState<WalletSession | null>(null)
   const [connectionOpen, setConnectionOpen] = useState(false)
   const [connectionVersion, setConnectionVersion] = useState(0)
+  const [connectSeconds, setConnectSeconds] = useState(0)
+  const [view, setView] = useState<'wallet' | 'inspect'>(() => new URLSearchParams(window.location.search).get('view') === 'inspect' ? 'inspect' : 'wallet')
   const rpcRef = useRef<PrivateRpc | null>(null)
   const connect = useCallback(async (client: PrivateRpc, retry = false) => {
+    setConnectSeconds(0)
     setRoute({ status: 'connecting', stats: client.stats })
     try { const result = retry ? await client.reconnect() : await client.connect(); if (rpcRef.current === client) { setConnectionVersion(previous => previous + 1); setRoute({ status: 'ready', blockNumber: result.blockNumber, stats: client.stats }) } }
     catch (error) { if (error instanceof PrivateRpcLifecycleError) return; if (rpcRef.current === client) setRoute({ status: 'failed', message: String(error), stats: client.stats }) }
@@ -39,11 +46,21 @@ export default function App() {
     }, 500)
     return () => window.clearInterval(timer)
   }, [rpc])
+  useEffect(() => {
+    if (route.status !== 'connecting') return
+    const started = Date.now()
+    const timer = window.setInterval(() => setConnectSeconds(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => window.clearInterval(timer)
+  }, [route.status])
   // A route failure blocks the API's transport but must not destroy payment progress.
   const api = useMemo(() => rpc ? createPayApi(rpc) : null, [rpc])
+  const inspectorRead = useCallback((method: string, params: unknown[]) => {
+    if (!rpc || route.status !== 'ready') return Promise.reject(new Error('Private connection unavailable. Reconnect before looking up chain data.'))
+    return jsonRpc(config.mempoolRpc, method, params, privateTransport(rpc))
+  }, [rpc, route.status])
   const changeNetwork = (next: PrivacyNetwork) => { const url = new URL(window.location.href); url.searchParams.set('network', next); window.location.assign(url.href) }
-  return <div className="app-shell"><header className="app-header"><strong className="brand"><img src={brandLogo} alt="" />0xPay</strong><span className="network-context">{chainNetwork === 'local' ? 'Local devnet' : 'Alt mempool devnet'}</span><button type="button" className={`route-chip ${route.status}`} onClick={() => setConnectionOpen(true)}>{route.status === 'ready' ? `Private connection · ${PRIVACY_NETWORKS[privacyNetwork].label}` : route.status === 'connecting' ? 'Connecting privately…' : route.status === 'disconnected' ? 'Private connection paused' : 'Connection interrupted'}</button></header>
+  return <div className="app-shell"><header className="app-header"><strong className="brand"><img src={brandLogo} alt="" />0xPay</strong><nav className="app-navigation" aria-label="Main navigation"><button type="button" aria-current={view === 'wallet' ? 'page' : undefined} onClick={() => setView('wallet')}>Wallet</button><button type="button" aria-current={view === 'inspect' ? 'page' : undefined} onClick={() => setView('inspect')}>Private lookup</button></nav><span className="network-context">{chainNetwork === 'local' ? 'Local devnet' : 'Alt mempool devnet'}</span><button type="button" className={`route-chip ${route.status}`} onClick={() => setConnectionOpen(true)}>{route.status === 'ready' ? `Private connection · ${PRIVACY_NETWORKS[privacyNetwork].label}` : route.status === 'connecting' ? `Connecting privately… ${connectSeconds}s` : route.status === 'disconnected' ? 'Private connection paused' : 'Connection interrupted'}</button></header>
     <ConnectionDetails open={connectionOpen} networkLabel={chainNetwork === 'local' ? 'Local devnet · chain 1337' : 'Alt mempool devnet · chain 1337'} route={route} traffic={trafficSnapshot()} onClose={() => setConnectionOpen(false)} onReconnect={() => { if (rpcRef.current) void connect(rpcRef.current, true) }} onDisconnect={() => { rpcRef.current?.disconnect(); setRoute({ status: 'disconnected', stats: rpcRef.current?.stats ?? emptyStats, message: 'Disconnected by you. Reconnect when you are ready.' }) }} privacyNetwork={privacyNetwork} onNetworkChange={changeNetwork} />
-    <main className="wallet-main"><WalletPanel session={wallet} onSession={setWallet} blockNumber={route.blockNumber ?? null}>{api && PayApp ? <PayApp key={wallet ? `${wallet.id}:${wallet.generation}` : 'locked'} api={api} connectionReady={route.status === 'ready'} connectionMessage={route.message} connectionVersion={connectionVersion} /> : <p role="status">{route.message ?? 'Connecting to Anon-RPC…'}</p>}</WalletPanel></main>
+    <main className="wallet-main">{route.status === 'connecting' && connectSeconds >= 20 && <p className="route-error" role="status">The private connection is taking longer than usual. {privacyNetwork === 'nox' && <button type="button" onClick={() => changeNetwork('nym')}>Try Nym</button>}</p>}<div hidden={view !== 'wallet'}><WalletPanel session={wallet} onSession={setWallet} blockNumber={route.blockNumber ?? null}>{api && PayApp ? <PayApp key={wallet ? `${wallet.id}:${wallet.generation}` : 'locked'} api={api} connectionReady={route.status === 'ready'} connectionMessage={route.status === 'connecting' ? 'Connecting privately. Wallet reads will start when the route is ready.' : route.message} connectionVersion={connectionVersion} /> : <p role="status">{route.message ?? 'Connecting to Anon-RPC…'}</p>}</WalletPanel></div><div hidden={view !== 'inspect'}><PrivateInspector read={inspectorRead} routeReady={route.status === 'ready'} /></div></main>
     <footer className="app-footer"><span>0xPay · Devnet only</span><nav aria-label="Project links"><a href="https://github.com/Anand-0037/0xpay" target="_blank" rel="noopener noreferrer">Source</a><a href="https://github.com/Anand-0037" target="_blank" rel="noopener noreferrer">Anand on GitHub</a></nav></footer></div>
 }
