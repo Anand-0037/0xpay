@@ -60,7 +60,7 @@ The RPC endpoint sees the **contents** of routed requests but not the browser's 
 
 A payment link carries a bearer note secret. **The creator still holds the same note and can claim it first**; making a link is not a completed payment. After importing a link into encrypted storage, the app removes the secret from the address bar. Keep links and backups private.
 
-This is **unaudited devnet software** using a development trusted setup and draft ERC-8421. Do not use real funds. The design borrows the fixed-note pool pattern and uses Circom/SnarkJS, Poseidon, the Hegota support package and Anon-RPC; it does not claim to invent a new privacy primitive. AI tools assisted with design, implementation and tests.
+This is **unaudited devnet software** using a development trusted setup and draft ERC-8421. Do not use real funds. The design borrows the fixed-note pool pattern and uses Circom/SnarkJS, Poseidon, the Hegota support package and Anon-RPC; it does not claim to invent a new privacy primitive. OpenAI Codex and Claude assisted with the circuit and contract (`protocol/circuits/withdraw.circom`, `protocol/contracts/src/OxPayPool.sol`), wallet and recovery code (`src/pay/`, `src/pool/note-backup.ts`), tests (`tests/`) and drafts. Anand chose the product and privacy trade-offs and reviewed real devnet results.
 
 ## CROPS
 
