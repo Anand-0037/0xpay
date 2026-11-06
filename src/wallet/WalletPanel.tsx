@@ -153,16 +153,20 @@ export function WalletPanel({ blockNumber, engineReady, shieldFeeBasisPoints, co
       discardShieldQuote()
       const { discardPrivateSendQuote } = await import('../railgun/send')
       discardPrivateSendQuote()
-      selectLocalFunding()
+    } catch (cause) {
+      setError(`Wallet cleanup failed. Close this tab before using the wallet again. ${cause instanceof Error ? cause.message : ''}`)
+    } finally {
+      forgetInjectedWallet()
+      setInjected(null)
+      setFundingBalance(null)
       onSession(null)
       setRecoveryPhrase('')
       setShowRecovery(false)
       setAnswers(['', '', ''])
       setMode('unlock')
       setView('connect')
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not lock wallet')
-    } finally { setBusy(false) }
+      setBusy(false)
+    }
   }
 
   function confirmBackup(event: React.FormEvent<HTMLFormElement>) {
