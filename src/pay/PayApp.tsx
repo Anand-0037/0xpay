@@ -87,12 +87,15 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
     })
     if (!privateNotesOnly) void read('publicBalance', api.getPublicBalance())
     void read('privateBalance', api.getPrivateBalance())
-    void read('notes', api.listNotes().then(notes => {
+    const reconciledNotes = api.listNotes()
+    void read('notes', reconciledNotes.then(notes => {
       if (viewGate.current.isReadCurrent(ticket)) setImportedClaims(notes.filter(note => note.source === 'link' && note.spent !== true && note.commitment).map(note => note.commitment!))
       return notes.filter(note => note.spent !== true).length
     }))
     if (!privateNotesOnly) void read('tokens', api.tokenPortfolio())
-    void read('activity', api.activity())
+    // Restored notes are reserved until the chain check finishes. Read local
+    // activity afterward so a confirmed note is not left labelled pending.
+    void read('activity', reconciledNotes.then(() => api.activity(), () => api.activity()))
   }, [api, privateNotesOnly])
   useEffect(() => {
     let cancelled = false
