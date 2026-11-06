@@ -10,6 +10,7 @@ import { APP_RPC_URL } from '../rpc'
 import { assertPrivateRouteReady } from '../rpc/ethers-transport'
 import { findTransaction, markTransaction, recordSubmitted, unresolvedTransaction } from '../domain/tx-journal'
 import { getConnectedInjectedSigner } from '../wallet/injected'
+import { unlockedWalletId } from '../wallet/lifecycle'
 
 const NETWORK = NetworkName.EthereumSepolia
 const REVIEW_LIFETIME_MS = 120_000
@@ -32,7 +33,7 @@ export type ShieldReceipt =
   | { status: 'confirmed' | 'reverted'; transactionHash: string; explorerUrl: string; blockNumber: number }
   | { status: 'unknown'; transactionHash: string; explorerUrl: string; message: string }
 
-type PendingShield = { quote: ShieldQuote; shieldKey: string; gasDetails: TransactionGasDetailsType2 }
+type PendingShield = { quote: ShieldQuote; walletId: string; shieldKey: string; gasDetails: TransactionGasDetailsType2 }
 let pendingShield: PendingShield | null = null
 let submitting = false
 const submittedShields = new Map<string, { sourceAddress: string }>()
@@ -56,6 +57,7 @@ export async function quoteEthShield(amountWei: bigint, recipientAddress: string
   if (feeBasisPoints < 0n || feeBasisPoints >= 10_000n) throw new Error('Shield fee is unavailable')
   if (unresolvedTransaction('shield')) throw new Error('A previous shield is unresolved. Check its transaction before sending another.')
   pendingShield = null
+  const walletId = unlockedWalletId()
 
   const signer = await getConnectedInjectedSigner()
   const sourceAddress = getAddress(await signer.getAddress())
@@ -89,7 +91,7 @@ export async function quoteEthShield(amountWei: bigint, recipientAddress: string
       maxNetworkFeeWei, publicBalanceWei, sourceAddress,
       recipientAddress, expiresAt: Date.now() + REVIEW_LIFETIME_MS,
     }
-    pendingShield = { quote, shieldKey, gasDetails }
+    pendingShield = { quote, walletId, shieldKey, gasDetails }
     return quote
   } finally { provider.destroy() }
 }
@@ -125,6 +127,7 @@ export async function submitEthShield(quote: ShieldQuote): Promise<ShieldSubmiss
     pendingShield = null
     // An extension may broadcast before reporting a transport error. Never reuse this draft.
     assertPrivateRouteReady()
+    if (unlockedWalletId() !== draft.walletId) throw new Error('Private wallet changed before shielding')
     const sent = await signer.sendTransaction({ ...transaction, chainId: 11155111 })
     submittedShields.set(sent.hash, { sourceAddress: draft.quote.sourceAddress })
     let journalSaved = true

@@ -144,6 +144,7 @@ export async function submitPrivateWethSend(quote: PrivateSendQuote,
     const checkedSigner = await getConnectedInjectedSigner()
     if (getAddress(await checkedSigner.getAddress()) !== draft.quote.publicGasPayer) throw new Error('Public gas wallet changed before sending')
     assertPrivateRouteReady()
+    if (unlockedWalletId() !== draft.quote.walletId) throw new Error('Private wallet changed before sending')
     const response = await checkedSigner.sendTransaction({ ...transaction, chainId: 11155111 })
     sent.set(response.hash, { gasPayer: draft.quote.publicGasPayer })
     let journalSaved = true
