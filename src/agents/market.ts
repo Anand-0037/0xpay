@@ -133,23 +133,29 @@ async function readJson(url: string, signal?: AbortSignal, fetcher?: PublicMarke
   } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel) }
 }
 
-export async function loadMarkets(signal?: AbortSignal, fetcher?: PublicMarketFetcher): Promise<MarketSummary[]> {
+export async function loadMarkets(signal?: AbortSignal, fetcher?: PublicMarketFetcher,
+  onSkippedRows?: (count: number) => void): Promise<MarketSummary[]> {
   const rows = array(await readJson(MARKETS_URL, signal, fetcher), 20, 'market list')
   const retrievedAt = Date.now()
   const ids = new Set<string>(), tokens = new Set<string>()
-  const markets: MarketSummary[] = rows.map((raw) => {
+  const markets: MarketSummary[] = []
+  let skippedRows = 0
+  let firstFailure: unknown
+  for (const raw of rows) {
+    signal?.throwIfAborted()
+    try {
     const row = object(raw)
     if (row.version !== 'v1') throw new Error('This view supports explicitly identified v1 CTF markets only.')
     const id = text(row.id, 128, 'market ID')
     if (ids.has(id)) throw new Error('The venue returned a duplicate market.')
-    ids.add(id)
     const names = encodedArray(row.outcomes), tokenIds = encodedArray(row.clobTokenIds)
     if (names.length < 2 || names.length !== tokenIds.length) throw new Error('Incomplete venue outcome mapping.')
     const outcomeNames = new Set<string>()
+    const rowTokens = new Set<string>()
     const outcomes = names.map((name, index) => {
       const tokenId = token(tokenIds[index]), label = text(name, 80, 'outcome name')
-      if (tokens.has(tokenId) || outcomeNames.has(label)) throw new Error('The venue returned duplicate outcomes.')
-      tokens.add(tokenId); outcomeNames.add(label)
+      if (tokens.has(tokenId) || rowTokens.has(tokenId) || outcomeNames.has(label)) throw new Error('The venue returned duplicate outcomes.')
+      rowTokens.add(tokenId); outcomeNames.add(label)
       return { tokenId, name: label }
     })
     const listedActive = bool(row.active, 'active status'), closed = bool(row.closed, 'closed status')
@@ -160,10 +166,17 @@ export async function loadMarkets(signal?: AbortSignal, fetcher?: PublicMarketFe
     if (endDate !== null && !Number.isFinite(Date.parse(endDate))) throw new Error('Invalid venue end date.')
     const slug = text(row.slug, 256, 'market slug')
     if (!/^[a-zA-Z0-9_-]+$/.test(slug)) throw new Error('Invalid venue market slug.')
-    return { id, version: 'v1' as const, conditionId: condition(row.conditionId), question: text(row.question, 512, 'question'), slug,
+    const market: MarketSummary = { id, version: 'v1', conditionId: condition(row.conditionId), question: text(row.question, 512, 'question'), slug,
       endDate, outcomes, active, acceptingOrders, description: description(row.description),
       resolutionSource: resolutionUrl(row.resolutionSource), retrievedAt, sourceUrl: MARKETS_URL }
-  })
+    // Reserve IDs only after every field passes. A rejected row must not poison
+    // later valid rows that happen to reuse its ID or outcome tokens.
+    ids.add(id)
+    for (const tokenId of rowTokens) tokens.add(tokenId)
+    markets.push(market)
+    } catch (cause) { skippedRows++; firstFailure ??= cause }
+  }
+  if (rows.length > 0 && markets.length === 0) throw new Error(`All ${skippedRows} venue market rows were invalid or unsupported.`, { cause: firstFailure })
   for (const market of markets) {
     signal?.throwIfAborted()
     const text = marketSourceText(market)
@@ -171,6 +184,8 @@ export async function loadMarkets(signal?: AbortSignal, fetcher?: PublicMarketFe
     signal?.throwIfAborted()
     marketSources.set(market, { signature: JSON.stringify(market), text })
   }
+  signal?.throwIfAborted()
+  onSkippedRows?.(skippedRows)
   return markets
 }
 

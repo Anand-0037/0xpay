@@ -83,8 +83,10 @@ for (const [label, patch] of [
   })
 }
 
-test('catalog rejects duplicate market IDs and excessive response rows', async () => {
-  await withFetch(returning([gamma(), gamma()]), async () => assert.rejects(loadMarkets(), /duplicate market/))
+test('catalog skips duplicate market IDs but rejects excessive response rows', async () => {
+  let skipped = 0
+  await withFetch(returning([gamma(), gamma()]), async () => assert.equal((await loadMarkets(undefined, undefined, count => { skipped = count })).length, 1))
+  assert.equal(skipped, 1)
   await withFetch(returning(Array.from({ length: 21 }, gamma)), async () => assert.rejects(loadMarkets(), /market list/))
 })
 
@@ -263,6 +265,8 @@ test('metadata supports only safe bounded public source references and descripti
   for (const resolutionSource of ['http://example.com', 'javascript:alert(1)', 'https://user:password@example.com', 'plain source name']) {
     await withFetch(returning([{ ...gamma(), resolutionSource }]), async () => assert.equal((await loadMarkets())[0].resolutionSource, null))
   }
-  await withFetch(returning([{ ...gamma(), description: 'x'.repeat(8001) }]), async () => assert.rejects(loadMarkets(), /description/))
-  await withFetch(returning([{ ...gamma(), description: 'bad\u0000rules' }]), async () => assert.rejects(loadMarkets(), /description/))
+  const invalidDescription = (error: unknown) => error instanceof Error && /invalid or unsupported/.test(error.message) &&
+    error.cause instanceof Error && /description/.test(error.cause.message)
+  await withFetch(returning([{ ...gamma(), description: 'x'.repeat(8001) }]), async () => assert.rejects(loadMarkets(), invalidDescription))
+  await withFetch(returning([{ ...gamma(), description: 'bad\u0000rules' }]), async () => assert.rejects(loadMarkets(), invalidDescription))
 })
