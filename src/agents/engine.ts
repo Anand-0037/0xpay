@@ -33,12 +33,20 @@ export type PaperQuote = {
 export type PaperRecord = PaperQuote & {
   mode: 'paper'; id: string; proposalId: string; executedAt: number; marketId: string; question: string
   tokenId: string; outcome: string; estimatedProbabilityMicros: number; liquidityFingerprint: string
+  /** Present only when the actual authorization callback returned this digest. */
+  mandateDigest?: string
 }
 export type PaperJournalSnapshot = {
   version: 1; sessionId: string | null; createdAt: number | null; stopped: boolean; records: PaperRecord[]; spentMicros: number
 }
 type Persisted = { version: 1; sessionId: string; createdAt: number; stopped: boolean; records: PaperRecord[] }
 export type PolicyEvaluation = { allowed: boolean; reasons: string[]; quote: PaperQuote | null }
+export type PaperAuthorizationContext = Readonly<{
+  proposal: Readonly<AgentProposal>; quote: Readonly<PaperQuote>; policy: Readonly<AgentPolicy>
+  spentMicros: number; sessionId: string; spreadMicros: number; combinedOutcomeSharesMicros: bigint | null
+}>
+/** Synchronous, local authorization rechecked under the journal's write lock. */
+export type PaperAuthorization = (context: PaperAuthorizationContext) => string | void
 type ProposalInput = { book: OrderBookSnapshot; thesis: string; estimatedProbabilityMicros: number; stakeMicros: number }
 
 function integer(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): value is number {
@@ -209,6 +217,7 @@ function assess(proposal: AgentProposal, book: OrderBookSnapshot, policy: AgentP
 function validateRecord(record: unknown): asserts record is PaperRecord {
   if (!record || typeof record !== 'object') throw new Error('Invalid paper record.')
   const value = record as PaperRecord
+  if ('mandateDigest' in value && (typeof value.mandateDigest !== 'string' || !/^0x[0-9a-f]{64}$/i.test(value.mandateDigest))) throw new Error('Invalid paper mandate digest.')
   if (value.mode !== 'paper' || !text(value.id, 100) || value.id !== value.proposalId || !integer(value.executedAt, 1) ||
     typeof value.liquidityFingerprint !== 'string' || !/^0x[0-9a-f]{64}$/.test(value.liquidityFingerprint) ||
     !text(value.marketId, 200) || !text(value.question, 2000) || !text(value.tokenId, 200) || !text(value.outcome, 128) ||
@@ -292,8 +301,22 @@ export class PaperJournal {
       if (!stopped && epoch === this.stopEpoch) this.stopRequested = false
     })
   }
+  /** Serialize local mandate activation/revocation against this journal's fills.
+   * Stop queued work synchronously, before waiting for the shared Web Lock.
+   */
+  async revokeAuthorization(mutate: () => void): Promise<void> {
+    this.stopRequested = true; this.stopEpoch++
+    await exclusive(this.key, () => {
+      const state = this.snapshot()
+      // Persist the stop first: a failing authority write cannot leave a runner
+      // apparently enabled in another tab. Mutation itself must be synchronous.
+      this.save({ ...state, stopped: true }, Date.now())
+      const result = mutate() as unknown
+      if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('Paper authorization updates must be synchronous.')
+    })
+  }
   async execute(proposal: AgentProposal, book: OrderBookSnapshot, policy: AgentPolicy, now: number | undefined, stopped: boolean, canExecute?: () => boolean,
-    currentPosition?: () => OutcomeExposureContext | null): Promise<PaperRecord> {
+    currentPosition?: () => OutcomeExposureContext | null, authorization?: PaperAuthorization): Promise<PaperRecord> {
     const epoch = this.stopEpoch
     return exclusive(this.key, () => {
       if (epoch !== this.stopEpoch) throw new Error('Paper agent was stopped while this execution was waiting. Review a new proposal.')
@@ -310,7 +333,28 @@ export class PaperJournal {
         liquidityFingerprint: liquidityFingerprint(book) }
       validateRecord(record)
       if (canExecute && canExecute() !== true) throw new Error('Paper execution stopped because the private route or evidence is no longer valid.')
-      checkExposure(policy, book, evaluation.quote, state.records, currentPosition?.(), now ?? Date.now())
+      const position = currentPosition?.()
+      checkExposure(policy, book, evaluation.quote, state.records, position, now ?? Date.now())
+      if (authorization) {
+        if (!state.sessionId) throw new Error('Initialize the paper session before signing its authorization.')
+        let combinedOutcomeSharesMicros: bigint | null = null
+        if (position) {
+          checkExposure({ ...policy, maxOutcomeSharesMicros: Number.MAX_SAFE_INTEGER }, book, evaluation.quote, state.records, position, now ?? Date.now())
+          if (position.chainId !== 137 || position.tokenId !== book.tokenId) throw new Error('Paper authorization position does not match the outcome.')
+          combinedOutcomeSharesMicros = outcomeUnitsToMicros(position.balanceUnits, position.decimals) + BigInt(evaluation.quote.sharesMicros) +
+            state.records.filter(item => item.tokenId === book.tokenId).reduce((total, item) => total + BigInt(item.sharesMicros), 0n)
+        }
+        const result = authorization(Object.freeze({ proposal: Object.freeze({ ...proposal }),
+          quote: Object.freeze({ ...evaluation.quote, fills: evaluation.quote.fills.map(fill => Object.freeze({ ...fill })) }),
+          policy: Object.freeze({ ...policy, allowedMarketIds: [...policy.allowedMarketIds] }), spentMicros: state.spentMicros,
+          sessionId: state.sessionId, spreadMicros: book.asks[0].priceMicros - book.bids[0].priceMicros, combinedOutcomeSharesMicros })) as unknown
+        if (result && typeof (result as { then?: unknown }).then === 'function') throw new Error('Paper authorization must be synchronous.')
+        if (result !== undefined) {
+          if (typeof result !== 'string' || !/^0x[0-9a-f]{64}$/i.test(result)) throw new Error('Paper authorization returned an invalid mandate digest.')
+          record.mandateDigest = result.toLowerCase()
+        }
+        if (epoch !== this.stopEpoch || canExecute && canExecute() !== true) throw new Error('Paper execution stopped during final authorization.')
+      }
       this.save({ ...state, records: [...state.records, record] }, executedAt)
       return record
     })
@@ -318,6 +362,7 @@ export class PaperJournal {
 }
 
 export function executePaper(proposal: AgentProposal, book: OrderBookSnapshot, policy: AgentPolicy,
-  journal: PaperJournal, now?: number, stopped = false, canExecute?: () => boolean, currentPosition?: () => OutcomeExposureContext | null): Promise<PaperRecord> {
-  return journal.execute(proposal, book, policy, now, stopped, canExecute, currentPosition)
+  journal: PaperJournal, now?: number, stopped = false, canExecute?: () => boolean, currentPosition?: () => OutcomeExposureContext | null,
+  authorization?: PaperAuthorization): Promise<PaperRecord> {
+  return journal.execute(proposal, book, policy, now, stopped, canExecute, currentPosition, authorization)
 }

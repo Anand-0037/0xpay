@@ -52,11 +52,28 @@ test('market search appears only after actual data; failed and empty requests su
     assert.equal(document.querySelector('#agent-search'), null)
     assert.match(document.body.textContent!, /Waiting for the private route before retrieving/)
     assert.equal(attempts, 0)
+    assert.equal(document.querySelectorAll('.agent-flow-steps [aria-busy="true"]').length, 0, 'waiting for a route is not a market request')
+    assert.equal(document.querySelector('.agent-swarm'), null)
+    const jump = document.querySelector<HTMLAnchorElement>('.agent-hero-action')!
+    assert.equal(jump.getAttribute('href'), '#agent-markets-title')
+    assert.match(jump.textContent!, /Choose a market/)
+    assert.equal(document.getElementById('agent-markets-title')!.tabIndex, -1, 'the same-page target can receive keyboard focus')
+    assert.match(document.querySelector('h1')!.textContent!, /Review a market.*Keep account reads private/)
+    assert.match(document.querySelector('.agent-local-badge')!.textContent!, /PAPER ONLY.*NO REAL ORDERS/)
+    flushSync(() => root.render(createElement(AgentWorkspace, { route: { ...route, status: 'failed' }, routeGeneration: -1, onReconnect() {} })))
+    assert.equal([...document.querySelectorAll('button')].filter(button => button.textContent!.startsWith('Reconnect')).length, 1, 'a blocked first visit offers one reconnect action')
+    assert.equal(document.querySelector('.agent-route')!.getAttribute('aria-busy'), 'false')
+    assert.equal(document.querySelector('.agent-request-pending'), null)
+    assert.equal(attempts, 0)
     flushSync(() => root.render(createElement(AgentWorkspace, { route, routeGeneration: 1, onReconnect() {} })))
     assert.match(document.body.textContent!, /Fetching the market catalogue/)
     assert.match(document.querySelector('#agent-runner-title')!.textContent!, /^Agent activity$/)
     assert.doesNotMatch(document.body.textContent!, /on a leash|Live venue data/)
     await pause()
+    assert.equal(document.querySelector('.agent-flow [data-phase="market"]')!.getAttribute('aria-busy'), 'true')
+    assert.match(document.querySelector('.agent-flow [data-phase="market"]')!.textContent!, /Fetching catalogue via worker/)
+    assert.match(document.querySelector('.agent-request-pending[aria-busy="true"]')!.textContent!, /Fetching the market catalogue/)
+    assert.equal(document.querySelector('.agent-flow [data-phase="policy"]')!.getAttribute('aria-busy'), 'false')
     assert.match(document.querySelector('.agent-model-status')!.textContent!, /0G Private Computer is not configured/)
     assert.equal([...document.querySelectorAll('.agent-model-roles>div>span:last-child')].every(node => node.textContent === 'NOT RUN'), true)
 
@@ -66,6 +83,9 @@ test('market search appears only after actual data; failed and empty requests su
     assert.match(document.querySelector('.agent-market-error[role="alert"]')!.textContent!, /Market data is unavailable/)
     assert.match(document.querySelector('.agent-topline')!.textContent!, /Venue data unavailable through worker/)
     assert.doesNotMatch(document.querySelector('.agent-topline')!.textContent!, /markets loaded/)
+    assert.equal(document.querySelector('.agent-flow [data-phase="market"]')!.getAttribute('data-state'), 'held')
+    assert.equal(document.querySelectorAll('.agent-flow-steps [aria-busy="true"]').length, 0, 'a failed request must stop its motion')
+    assert.equal(document.querySelector('.agent-request-pending'), null, 'a failed catalogue cannot leave a loading indicator behind')
     const retry = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry market data')!
     flushSync(() => retry.click())
     await pause()
@@ -81,6 +101,8 @@ test('market search appears only after actual data; failed and empty requests su
     assert.equal(document.querySelector('.agent-market-error'), null)
     assert.match(document.querySelector('.agent-market-list')!.textContent!, /Synthetic test market/)
     assert.match(document.querySelector('.agent-topline')!.textContent!, /1 market loaded through worker/)
+    assert.equal(document.querySelector('.agent-flow [data-phase="market"]')!.getAttribute('data-state'), 'ready')
+    assert.equal(document.querySelector('.agent-flow [data-phase="policy"]')!.getAttribute('data-state'), 'idle', 'market retrieval is not a policy approval')
     assert.equal(dom.window.location.search, '?view=agents')
     assert.equal(document.querySelectorAll('.agent-record').length, 0)
   } finally {
@@ -211,6 +233,8 @@ test('a late research response cannot restore citations or estimates after the o
     assert.equal(document.querySelector('.agent-research-citations'), null)
     assert.doesNotMatch(document.body.textContent!, /STALE_RESEARCH_MUST_NOT_APPEAR|fixture-researcher-request/)
     assert.equal(document.querySelector<HTMLInputElement>('#agent-probability')!.value, '')
+    assert.equal(document.querySelector('.agent-flow [data-phase="research"]')!.getAttribute('aria-busy'), 'false')
+    assert.match(document.querySelector('.agent-flow [data-phase="research"]')!.textContent!, /Not requested/)
   } finally { await env.cleanup() }
 })
 
@@ -220,9 +244,42 @@ test('a configuration failure remains unavailable rather than fabricating resear
     const { document, until } = env
     flushSync(() => [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Run 0G research')!.click())
     await until(() => document.querySelector('.agent-model-status [role="alert"]') !== null)
-    assert.match(document.querySelector('.agent-model-status [role="alert"]')!.textContent!, /unavailable or not configured/)
+    assert.equal(document.querySelector('.agent-model-status [role="alert"]')!.textContent, '0G research is not configured on this server. No model result was returned.')
     assert.equal(document.querySelector('.agent-research-output'), null)
-    assert.equal([...document.querySelectorAll('.agent-model-roles>div>span:last-child')].every(node => node.textContent === 'NOT RUN'), true)
+    assert.equal([...document.querySelectorAll('.agent-model-roles>div>span:last-child')].every(node => node.textContent === 'NO RESULT'), true, 'a failed pipeline may have run a role; no completion is claimed')
+    assert.equal(document.querySelector('.agent-flow [data-phase="research"]')!.getAttribute('data-state'), 'held')
+    assert.equal(document.querySelector('.agent-model-status')!.getAttribute('data-research-state'), 'failed')
+    assert.equal(document.querySelector('.agent-model-status .agent-request-pending'), null)
+    assert.equal(document.querySelectorAll('.agent-record').length, 0)
+  } finally { await env.cleanup() }
+})
+
+test('workflow motion follows the single pending research request without inventing per-role progress', async () => {
+  let release!: (response: Response) => void
+  const env = await researchEnvironment(() => new Promise<Response>(resolve => { release = resolve }))
+  try {
+    const { document, payloads, until } = env
+    assert.equal(document.querySelectorAll('.agent-flow-steps [aria-busy="true"]').length, 0)
+    flushSync(() => [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Run 0G research')!.click())
+    await until(() => payloads.length === 1)
+    const pipeline = document.querySelector('.agent-flow [data-phase="research"]')!
+    assert.equal(pipeline.getAttribute('aria-busy'), 'true')
+    assert.match(pipeline.textContent!, /Waiting for pipeline result/)
+    assert.equal(document.querySelectorAll('.agent-flow-steps [aria-busy="true"]').length, 1)
+    assert.equal(document.querySelector('.agent-flow [data-phase="account"]')!.getAttribute('data-state'), 'idle')
+    assert.equal(document.querySelector('.agent-flow [data-phase="policy"]')!.getAttribute('data-state'), 'idle')
+    assert.equal([...document.querySelectorAll('.agent-model-roles>div>span:last-child')].every(node => node.textContent === 'AWAITING RESULT'), true)
+    assert.doesNotMatch(document.querySelector('.agent-model-roles')!.textContent!, /REQUESTED|RETURNED|RUNNING/)
+    assert.match(document.querySelector('.agent-model-status')!.textContent!, /Per-role progress is not reported/)
+    assert.equal(document.querySelector('.agent-model-status')!.getAttribute('data-research-state'), 'pending')
+    release(Response.json(fixtureResearch()))
+    await until(() => document.querySelector('.agent-research-output') !== null)
+    assert.equal(pipeline.getAttribute('aria-busy'), 'false')
+    assert.match(pipeline.textContent!, /Two role responses received/)
+    assert.equal(document.querySelectorAll('.agent-flow-steps [aria-busy="true"]').length, 0)
+    assert.equal(document.querySelector('.agent-model-status')!.getAttribute('data-research-state'), 'returned')
+    assert.equal(document.querySelector('.agent-model-status .agent-request-pending'), null)
+    assert.equal(document.querySelector('.agent-flow [data-phase="policy"]')!.getAttribute('data-state'), 'idle', 'two model responses still require human adoption and a policy check')
     assert.equal(document.querySelectorAll('.agent-record').length, 0)
   } finally { await env.cleanup() }
 })
@@ -239,6 +296,7 @@ test('a private-route interruption preserves paid public research and its explic
     await pause()
     assert.match(document.querySelector('.agent-route')!.textContent!, /Private route interrupted/)
     assert.doesNotMatch(document.querySelector('.agent-route')!.textContent!, /Checking|Connecting|Validating/)
+    assert.equal(document.querySelector('.agent-route')!.getAttribute('aria-busy'), 'false')
     assert.match(document.querySelector('.agent-research-output')!.textContent!, /fixture-researcher-request/)
     assert.equal(document.querySelector<HTMLInputElement>('#agent-probability')!.value, '61')
     assert.equal(document.querySelector<HTMLButtonElement>('.agent-market-list button')!.getAttribute('aria-pressed'), 'true')
@@ -265,6 +323,8 @@ test('public research already in flight can complete across an unrelated private
     await until(() => payloads.length === 1)
     const failed = { ...env.route, status: 'failed' as const }
     flushSync(() => root.render(createElement(AgentWorkspace, { route: failed, routeGeneration: -1, onReconnect() {} })))
+    assert.equal(document.querySelector('.agent-route')!.getAttribute('aria-busy'), 'false')
+    assert.equal(document.querySelectorAll('.agent-model-status .agent-request-pending').length, 1, 'the separate model request remains pending while private-route motion stops')
     release(Response.json(fixtureResearch()))
     await until(() => document.querySelector('.agent-research-output') !== null)
     assert.match(document.querySelector('.agent-research-output')!.textContent!, /fixture-skeptic-request/)

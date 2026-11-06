@@ -5,6 +5,10 @@ import { createProposal, evaluatePolicy, evaluateProposalForReview, executePaper
 import { checkAgentPrivateRoute } from './route-check'
 import { readPredictionPreflight, type PredictionPreflight } from './preflight'
 import { requestPublicResearch, type PublicResearchResult, type PublicResearchSource } from './research-client'
+import { perOrderLimitMicros } from './order-limit'
+import { AgentMandatePanel } from './AgentMandatePanel'
+import { AgentMandateStore } from './mandate-store'
+import { validateSignedAgentMandate } from './mandate'
 
 type Route = Pick<PrivateRpc, 'status' | 'fetchRpc'> & Partial<Pick<PrivateRpc, 'fetchPublicMarket'>>
 type Props = { route: Route | null; routeGeneration: number; onReconnect: () => void }
@@ -13,8 +17,9 @@ type Prepared = { proposal: AgentProposal; policy: AgentPolicy; reasons: string[
 type AccountSnapshot = { value: PredictionPreflight; route: Route; generation: number; tokenId: string; input: string; checkedAt: number }
 type ResearchSnapshot = { market: MarketSummary; tokenId: string; sources: PublicResearchSource[]; result: PublicResearchResult; completedAt: number }
 type ResearchService = { status: 'unknown' } | { status: 'error' } | { status: 'ready'; configured: boolean; jobsRemaining: number; jobLimit: number }
-type Draft = { thesis: string; probability: string; stake: string; budget: string; expiry: string; maxPrice: string; maxSpread: string; maxExposure: string }
-const INITIAL_DRAFT: Draft = { thesis: '', probability: '', stake: '5', budget: '20', expiry: '30', maxPrice: '70', maxSpread: '5', maxExposure: '50' }
+type FlowStep = { id: string; label: string; detail: string; state: 'idle' | 'busy' | 'ready' | 'held' }
+type Draft = { thesis: string; probability: string; stake: string; maxOrder: string; budget: string; expiry: string; maxPrice: string; maxSpread: string; maxExposure: string }
+const INITIAL_DRAFT: Draft = { thesis: '', probability: '', stake: '5', maxOrder: '5', budget: '20', expiry: '30', maxPrice: '70', maxSpread: '5', maxExposure: '50' }
 const INTERVAL_MS = 30_000
 const ACCOUNT_MAX_AGE_MS = 90_000
 const RESEARCH_MAX_AGE_MS = 10 * 60_000
@@ -63,12 +68,24 @@ function inputsFor(draft: Draft, market: MarketSummary) {
   if (probability < 0 || probability > 1_000_000) throw new Error('Your probability must be from 0% to 100%.')
   if (hundredthsOfMinute < 100 || hundredthsOfMinute > 144_000) throw new Error('Choose an expiry between 1 and 1,440 minutes.')
   return { probability, stake: parseUnits(draft.stake, 6, 'paper stake'), policy: {
-    allowedMarketIds: [market.id], maxOrderMicros: parseUnits(draft.stake, 6, 'paper stake'),
+    allowedMarketIds: [market.id], maxOrderMicros: perOrderLimitMicros(draft.maxOrder),
     sessionBudgetMicros: parseUnits(draft.budget, 6, 'paper budget'), expiresAt: Date.now() + hundredthsOfMinute * 600,
     maxSnapshotAgeMs: 90_000, maxSpreadMicros: parseUnits(draft.maxSpread, 4, 'maximum spread'),
     maxPriceMicros: parseUnits(draft.maxPrice, 4, 'maximum price'),
     maxOutcomeSharesMicros: parseUnits(draft.maxExposure, 6, 'combined outcome share cap'),
   } satisfies AgentPolicy }
+}
+
+function LiveWorkflow({ steps }: { steps: FlowStep[] }) {
+  return <div className="agent-flow" aria-label="Current workflow activity">
+    <div className="agent-flow-heading"><span className="agent-flow-spark" aria-hidden="true">✳</span><span>Inside this workspace</span></div>
+    <ol className="agent-flow-steps">{steps.map((step, index) => <li key={step.id} data-phase={step.id} data-state={step.state} aria-busy={step.state === 'busy'}>
+      <span className="agent-flow-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><rect x="7" y="8" width="18" height="18" rx="6" /><path d="M16 4v4M4 16h3m18 0h3M12 26v3m8-3v3" /><path className="agent-flow-eyes" d="M12 15v3m8-3v3" /></svg><span>{String(index + 1).padStart(2, '0')}</span></span>
+      <div><strong>{step.label}</strong><span className="agent-flow-detail">{step.detail}</span></div>
+      <span className="agent-flow-indicator" aria-hidden="true" />
+    </li>)}</ol>
+    <p className="agent-flow-caption">Real requests. Local paper decisions.</p>
+  </div>
 }
 
 function ResearchOutput({ snapshot, adopted, onAdopt, disabled }: { snapshot: ResearchSnapshot; adopted: boolean; onAdopt: () => void; disabled: boolean }) {
@@ -105,6 +122,7 @@ function AgentWorkspaceForRoute({ route, routeGeneration, onReconnect }: Props) 
   const [markets, setMarkets] = useState<MarketSummary[]>([])
   const [marketLoading, setMarketLoading] = useState(true)
   const [marketError, setMarketError] = useState('')
+  const [skippedMarketRows, setSkippedMarketRows] = useState(0)
   const [search, setSearch] = useState('')
   const [refresh, setRefresh] = useState(0)
   const [selectedId, setSelectedId] = useState('')
@@ -116,9 +134,12 @@ function AgentWorkspaceForRoute({ route, routeGeneration, onReconnect }: Props) 
   const [draft, setDraft] = useState<Draft>(INITIAL_DRAFT)
   const [prepared, setPrepared] = useState<Prepared | null>(null)
   const [formError, setFormError] = useState('')
+  const [, refreshMandate] = useState(0)
+  const [mandatePending, setMandatePending] = useState(false)
   const [routeCheck, setRouteCheck] = useState<RouteCheck | null>(null)
   const [routeError, setRouteError] = useState('')
   const [running, setRunning] = useState(false)
+  const [cyclePhase, setCyclePhase] = useState<'idle' | 'route' | 'account' | 'book' | 'policy'>('idle')
   const [runMessage, setRunMessage] = useState('Choose a market and prepare your first proposal.')
   const [journalResult] = useState(() => {
     try {
@@ -127,6 +148,14 @@ function AgentWorkspaceForRoute({ route, routeGeneration, onReconnect }: Props) 
     } catch (cause) { return { journal: null, initialLedger: null, error: causeMessage(cause) } }
   })
   const [ledger, setLedger] = useState(journalResult.initialLedger)
+  const signedMandate = (() => {
+    try {
+      if (!ledger?.sessionId) return null
+      const state = new AgentMandateStore(window.localStorage, ledger.sessionId).load()
+      if (!state.active || state.active.payload.nonce !== state.currentNonce) return null
+      return validateSignedAgentMandate(state.active, Math.floor(Date.now() / 1000))
+    } catch { return null }
+  })()
   const [watchAddress, setWatchAddress] = useState('')
   const [watchResult, setWatchResult] = useState<AccountSnapshot | null>(null)
   const [watchError, setWatchError] = useState('')
@@ -141,6 +170,7 @@ function AgentWorkspaceForRoute({ route, routeGeneration, onReconnect }: Props) 
   const active = useRef(true)
   const epoch = useRef(0)
   const runAbort = useRef<AbortController | null>(null)
+  const runningMandateDigest = useRef<string | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const watchEpoch = useRef(0)
   const latestAccount = useRef<AccountSnapshot | null>(null)
@@ -160,6 +190,32 @@ function AgentWorkspaceForRoute({ route, routeGeneration, onReconnect }: Props) 
   const modelReady = currentResearch !== null && adoptedResearch === currentResearch && researchFresh(currentResearch) &&
     currentResearch.result.skeptic.verdict === 'review' && currentResearch.result.researcher.estimatedProbabilityMicros !== null && currentResearch.result.researcher.thesis !== null
 
+  useEffect(() => {
+    if (!running) return
+    const inspectAuthority = () => {
+      try {
+        const sessionId = journalResult.journal?.snapshot().sessionId
+        if (!sessionId) throw new Error('Missing paper session.')
+        const state = new AgentMandateStore(window.localStorage, sessionId).load()
+        if (!state.active || state.active.payload.nonce !== state.currentNonce ||
+          validateSignedAgentMandate(state.active, Math.floor(Date.now() / 1000)).digest !== runningMandateDigest.current) throw new Error('Mandate changed.')
+      } catch {
+        epoch.current++; runAbort.current?.abort(); runAbort.current = null
+        if (timer.current) clearTimeout(timer.current)
+        timer.current = null; runningMandateDigest.current = null
+        setRunning(false); setCyclePhase('idle')
+        setRunMessage('Agent paused. The signed mandate expired, changed or was revoked.')
+        void journalResult.journal?.setStopped(true).catch(() => {})
+      }
+    }
+    const interval = window.setInterval(inspectAuthority, 1_000)
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key.startsWith('0xpay-paper-mandate-v1')) inspectAuthority()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => { window.clearInterval(interval); window.removeEventListener('storage', onStorage) }
+  }, [running, journalResult])
+
   useLayoutEffect(() => {
     routeIdentity.current = { route, generation: routeGeneration }
     return () => {
@@ -173,7 +229,7 @@ function AgentWorkspaceForRoute({ route, routeGeneration, onReconnect }: Props) 
       void journalResult.journal?.setStopped(true).catch(() => {})
       queueMicrotask(() => {
         if (!active.current) return
-        setRunning(false); setWatchResult(null); setWatchLoading(false); setWatchError(''); setPrepared(null); setRouteCheck(null); setRouteError('')
+        setRunning(false); setCyclePhase('idle'); setWatchResult(null); setWatchLoading(false); setWatchError(''); setPrepared(null); setRouteCheck(null); setRouteError('')
         setRunMessage('Private connection changed. Re-read the selected position before continuing. Public research is preserved.')
       })
     }
@@ -210,10 +266,12 @@ function AgentWorkspaceForRoute({ route, routeGeneration, onReconnect }: Props) 
     if (!route || !privateMarketReady || completedCatalogue.current === refresh) return
     const abort = new AbortController()
     queueMicrotask(() => { if (!abort.signal.aborted) { setMarketLoading(true); setMarketError('') } })
-    void loadMarkets(abort.signal, privateMarketFetcher(route)).then(rows => {
+    void loadMarkets(abort.signal, privateMarketFetcher(route), count => {
+      if (!abort.signal.aborted) setSkippedMarketRows(count)
+    }).then(rows => {
       if (!abort.signal.aborted) { completedCatalogue.current = refresh; setMarkets(rows); setMarketLoading(false); setMarketError('') }
     }).catch((cause: unknown) => {
-      if (!abort.signal.aborted) { setMarkets([]); setMarketLoading(false); setMarketError(causeMessage(cause)) }
+      if (!abort.signal.aborted) { setMarkets([]); setSkippedMarketRows(0); setMarketLoading(false); setMarketError(causeMessage(cause)) }
     })
     return () => abort.abort()
   }, [refresh, route, privateMarketReady, routeGeneration])
@@ -319,23 +377,38 @@ function AgentWorkspaceForRoute({ route, routeGeneration, onReconnect }: Props) 
 
   async function stop() {
     epoch.current++; runAbort.current?.abort(); runAbort.current = null
+    runningMandateDigest.current = null
     if (timer.current) clearTimeout(timer.current)
     timer.current = null
-    setRunning(false); setRunMessage('Stopped. Pending results are discarded; no new cycles will run.')
+    setRunning(false); setCyclePhase('idle'); setRunMessage('Stopped. Pending results are discarded; no new cycles will run.')
     try { await journalResult.journal?.setStopped(true); if (active.current) setLedger(journalResult.journal?.snapshot() ?? null) }
     catch (cause) { if (active.current) setFormError(causeMessage(cause)) }
   }
 
   async function start() {
     const journal = journalResult.journal
-    if (!route || !privateReady || !prepared?.allowed || !market || !journal || running || !accountContext) return
+    if (!route || !privateReady || !prepared?.allowed || !market || !journal || running || !accountContext || mandatePending) return
+    let sessionId: string | null
+    try { sessionId = journal.snapshot().sessionId }
+    catch (cause) { setFormError(causeMessage(cause)); return }
+    if (!sessionId || !signedMandate) { setFormError('Sign an active paper mandate before starting the agent.'); return }
+    const authority = new AgentMandateStore(window.localStorage, sessionId)
+    const mandateOwner = signedMandate.owner, mandateDigest = signedMandate.digest
     if (proposalMode === 'model' && !modelReady) { setFormError('Refresh and adopt the matching 0G research before starting.'); return }
     if (Date.now() - accountContext.checkedAt > ACCOUNT_MAX_AGE_MS) { setFormError('Refresh the selected-outcome position before starting.'); return }
     const source = route, selectedMarket = market, index = outcomeIndex, input = inputsFor(draft, market)
     const policy = prepared.policy, thesis = draft.thesis.trim(), account = accountContext.value.account, evidence = proposalMode === 'model' ? currentResearch : null, generation = ++epoch.current
     const controller = new AbortController(); runAbort.current = controller
+    runningMandateDigest.current = mandateDigest
+    const authorityCurrent = () => {
+      try {
+        const state = authority.load()
+        return state.active !== null && state.currentNonce === state.active.payload.nonce &&
+          validateSignedAgentMandate(state.active, Math.floor(Date.now() / 1000)).digest === mandateDigest
+      } catch { return false }
+    }
     const current = () => active.current && epoch.current === generation && source.status === 'ready' && !controller.signal.aborted &&
-      routeIdentity.current.route === source && routeIdentity.current.generation === routeGeneration
+      routeIdentity.current.route === source && routeIdentity.current.generation === routeGeneration && authorityCurrent()
     const currentPosition = () => {
       const latest = latestAccount.current
       return latest && latest.route === source && latest.generation === routeGeneration && latest.input === account.toLowerCase() &&
@@ -349,37 +422,43 @@ function AgentWorkspaceForRoute({ route, routeGeneration, onReconnect }: Props) 
         if (!current()) return
         try {
           if (evidence && !researchFresh(evidence)) throw new Error('0G research evidence has expired. Refresh it before restarting paper checks.')
+          setCyclePhase('route')
           await checkAgentPrivateRoute(source)
           if (!current()) return
+          setCyclePhase('account')
           const position = await readPredictionPreflight(source, account, selectedMarket, index)
           if (!current()) return
           const accountSnapshot = { value: position, route: source, generation: routeGeneration, tokenId: position.tokenId, input: account.toLowerCase(), checkedAt: Date.now() }
           latestAccount.current = accountSnapshot; setWatchResult(accountSnapshot)
+          setCyclePhase('book')
           const snapshot = await loadOrderBook(selectedMarket, index, controller.signal, privateMarketFetcher(source))
           if (!current()) return
+          setCyclePhase('policy')
           const proposal = createProposal({ book: snapshot, thesis, estimatedProbabilityMicros: input.probability, stakeMicros: input.stake })
           const decision = evaluatePolicy(proposal, snapshot, policy, journal, Date.now(), false, exposureContext(accountSnapshot))
           setBookResult({ tokenId: snapshot.tokenId, book: snapshot })
           setPrepared({ proposal, policy, reasons: decision.reasons, allowed: decision.allowed, quote: decision.quote })
           if (decision.allowed) {
             const record = await executePaper(proposal, snapshot, policy, journal, undefined, false,
-              () => current() && (!evidence || researchFresh(evidence)), currentPosition)
+              () => current() && (!evidence || researchFresh(evidence)), currentPosition,
+              attempt => authority.authorize(attempt, { owner: mandateOwner, watchedAccount: account, agentId: 'prediction-paper-runner' }))
             if (!current()) return
             setLedger(journal.snapshot()); setRunMessage(`Paper fill recorded: ${shares(record.sharesMicros)} ${record.outcome} shares for ${usd(record.spentMicros)}. Next check in 30 seconds.`)
           } else {
             setRunMessage(`No paper order: ${decision.reasons.join(' ') || 'Your policy did not allow this proposal.'}`)
           }
+          setCyclePhase('idle')
           if (Date.now() >= policy.expiresAt) { await stop(); return }
           if (current()) timer.current = setTimeout(() => { void cycle() }, INTERVAL_MS)
         } catch (cause) {
           if (!current()) return
-          epoch.current++; latestAccount.current = null; setRunning(false); setWatchResult(null); setPrepared(null); setRunMessage('Run paused. Refresh the selected position before restarting.'); setFormError(causeMessage(cause))
+          epoch.current++; latestAccount.current = null; setRunning(false); setCyclePhase('idle'); setWatchResult(null); setPrepared(null); setRunMessage('Run paused. Refresh the selected position before restarting.'); setFormError(causeMessage(cause))
           try { await journal.setStopped(true) }
           catch (stopCause) { if (active.current) setFormError(`${causeMessage(cause)} ${causeMessage(stopCause)}`) }
         }
       }
       await cycle()
-    } catch (cause) { if (current()) { setRunning(false); setFormError(causeMessage(cause)) } }
+    } catch (cause) { if (current()) { setRunning(false); setCyclePhase('idle'); setFormError(causeMessage(cause)) } }
   }
 
   async function checkWatchAddress() {
@@ -403,65 +482,84 @@ function AgentWorkspaceForRoute({ route, routeGeneration, onReconnect }: Props) 
   const records = ledger?.records ?? []
   const routeInterrupted = route?.status === 'failed' || route?.status === 'degraded'
   const routeDisconnected = route?.status === 'closed'
+  const routePending = route?.status === 'connecting' || route?.status === 'ready' && !privateReady && !routeError
+  const marketReconnectVisible = !privateMarketReady && markets.length === 0 && (routeInterrupted || routeDisconnected || route?.status === 'ready')
+  const marketBusy = privateMarketReady && (marketLoading || bookLoading || cyclePhase === 'book')
+  const accountBusy = privateReady && (watchLoading || cyclePhase === 'account' || cyclePhase === 'route')
+  const cycleNetworkBusy = privateMarketReady && (cyclePhase === 'route' || cyclePhase === 'account' || cyclePhase === 'book')
+  const flowSteps: FlowStep[] = [
+    { id: 'market', label: 'Market data', state: marketBusy ? 'busy' : marketError || bookError ? 'held' : markets.length > 0 ? 'ready' : 'idle',
+      detail: marketBusy ? marketLoading ? 'Fetching catalogue via worker' : 'Reading order book via worker' : marketError || bookError ? 'No valid venue response' : markets.length > 0 ? book ? 'Catalogue + quote retrieved' : `${markets.length} markets retrieved` : !privateMarketReady ? 'Waiting for private route' : 'No open markets returned' },
+    { id: 'research', label: '0G research pipeline', state: researchLoading ? 'busy' : currentResearch ? 'ready' : researchError ? 'held' : 'idle',
+      detail: researchLoading ? 'Waiting for pipeline result' : currentResearch ? 'Two role responses received' : researchError ? 'No result accepted' : researchService.status === 'ready' && !researchService.configured ? 'Server not configured' : 'Not requested' },
+    { id: 'account', label: 'Private account reads', state: accountBusy ? 'busy' : accountContext ? 'ready' : watchError ? 'held' : 'idle',
+      detail: accountBusy ? cyclePhase === 'route' ? 'Checking the private route' : 'Reading Polygon snapshot' : accountContext ? `Snapshot · block ${accountContext.value.blockNumber.toLocaleString()}` : routeInterrupted || routeDisconnected ? 'Paused · route unavailable' : watchError ? 'No snapshot accepted' : 'Awaiting selected position' },
+    { id: 'policy', label: 'Local paper policy', state: prepared ? prepared.allowed ? 'ready' : 'held' : 'idle',
+      detail: running ? cyclePhase === 'idle' ? 'Next paper check scheduled' : cyclePhase === 'policy' ? 'Checking local paper journal' : 'Waiting for fresh inputs' : prepared ? prepared.allowed ? 'Paper proposal allowed' : 'Paper proposal held' : 'Not evaluated' },
+  ]
   return <main className="agent-workspace">
     <header className="agent-hero">
-      <div><p className="agent-eyebrow">0xPay privacy wallet · Prediction workspace <span className="agent-local-badge">PAPER ONLY · NO REAL ORDERS</span></p>
-        <h1>Market context.<br /><em>Private wallet reads.</em></h1>
-        <p>Explore public prediction markets and inspect a wallet’s selected position through Anon-RPC. This workspace does not place real orders.</p></div>
-      <div className="agent-swarm" aria-hidden="true">{Array.from({ length: 12 }, (_, index) => <span className="agent-sprite" key={index} />)}</div>
+      <div><p className="agent-eyebrow">Prediction workspace <span className="agent-local-badge">PAPER ONLY · NO REAL ORDERS</span></p>
+        <h1>Review a market.<br /><em>Keep account reads private.</em></h1>
+        <p className="agent-hero-copy">Choose a market, review public evidence and check a position through Anon-RPC before a simulated order.</p>
+        <a className="agent-hero-action" href="#agent-markets-title">Choose a market <span aria-hidden="true">↓</span></a></div>
+      <LiveWorkflow steps={flowSteps} />
     </header>
-    <div className="agent-topline"><div className={`agent-route ${privateReady ? 'ready' : routeError || routeInterrupted ? 'failed' : ''}`} role="status"><span className="agent-route-dot" />
+    <div className="agent-topline"><div className={`agent-route ${privateReady ? 'ready' : routeError || routeInterrupted ? 'failed' : ''}`} role="status" aria-busy={routePending}><span className="agent-route-dot" />
       <span>{privateReady ? `Polygon private-route check · block ${routeCheck.blockNumber.toLocaleString()}` : routeDisconnected ? 'Private route disconnected' : routeInterrupted ? 'Private route interrupted' : routeError ? 'Private-route check failed' : route?.status === 'ready' ? 'Validating the Polygon private route…' : 'Connecting the private route…'}</span>
-      {!privateReady && (routeInterrupted || routeDisconnected || routeError) && <button type="button" onClick={onReconnect}>Reconnect</button>}</div><p>{!privateMarketReady && markets.length === 0 ? 'Market retrieval waiting for private route' : marketLoading ? 'Fetching market data through worker…' : marketError ? 'Venue data unavailable through worker' : markets.length ? `${markets.length} ${markets.length === 1 ? 'market' : 'markets'} loaded through worker` : 'No open markets returned'} · Paper only</p></div>
+      {!privateReady && !marketReconnectVisible && (routeInterrupted || routeDisconnected || routeError) && <button type="button" onClick={onReconnect}>Reconnect</button>}</div><p>{!privateMarketReady && markets.length === 0 ? 'Market retrieval waiting for private route' : marketBusy ? 'Fetching market data through worker…' : marketError ? 'Venue data unavailable through worker' : markets.length ? `${markets.length} ${markets.length === 1 ? 'market' : 'markets'} loaded through worker` : 'No open markets returned'} · Paper only</p></div>
     <div className="agent-layout">
-      <section className="agent-card" aria-labelledby="agent-markets-title"><div className="agent-card-heading"><div><p className="agent-eyebrow">01 / Find a market</p><h2 id="agent-markets-title">What’s your angle?</h2></div>
+      <section className="agent-card" aria-labelledby="agent-markets-title"><div className="agent-card-heading"><div><p className="agent-eyebrow">01 / Find a market</p><h2 id="agent-markets-title" tabIndex={-1}>Choose a market</h2></div>
         {!marketError && <button className="agent-quiet-button" disabled={marketLoading || running || !privateMarketReady} type="button" onClick={reloadMarkets}>Refresh</button>}</div>
         <p className="agent-card-intro">Public Polymarket data requested through the selected Anon-RPC worker. No direct venue fallback and no trading credentials.</p>
+        {!marketLoading && !marketError && skippedMarketRows > 0 && <p className="agent-card-intro" role="status">Skipped {skippedMarketRows} invalid or unsupported market {skippedMarketRows === 1 ? 'row' : 'rows'}.</p>}
         {!marketLoading && !marketError && markets.length > 0 && <><label className="agent-visually-hidden" htmlFor="agent-search">Search loaded markets</label><input id="agent-search" className="agent-search" placeholder="Search loaded markets…" value={search} onChange={event => setSearch(event.target.value)} /></>}
-        {!privateMarketReady && markets.length === 0 ? <div className="agent-loading" role="status"><p>{routeInterrupted || routeDisconnected ? 'The private route is unavailable. Reconnect before retrieving markets.' : route?.status === 'ready' ? 'Private market transport is unavailable. Reconnect to retrieve venue data.' : 'Waiting for the private route before retrieving any market data.'}</p>{(routeInterrupted || routeDisconnected || route?.status === 'ready') && <button className="agent-quiet-button" type="button" onClick={onReconnect}>Reconnect for market data</button>}</div> : marketLoading ? <p className="agent-loading" role="status">Fetching the market catalogue through the worker…</p> : marketError ? <div className="agent-market-error" role="alert"><strong>Market data is unavailable.</strong><p>The venue could not provide a valid response through the worker. No direct request was attempted.</p><button className="agent-quiet-button" type="button" disabled={!privateMarketReady} onClick={reloadMarkets}>Retry market data</button><details><summary>Connection details</summary><p>{marketError}</p></details></div> : markets.length === 0 ? <p className="agent-empty">The venue returned no open markets. Refresh to check again.</p> : filtered.length === 0 ? <p className="agent-empty">No loaded markets match your search.</p> :
+        {!privateMarketReady && markets.length === 0 ? <div className="agent-loading" role="status"><p>{routeInterrupted || routeDisconnected ? 'The private route is unavailable. Reconnect before retrieving markets.' : route?.status === 'ready' ? 'Private market transport is unavailable. Reconnect to retrieve venue data.' : 'Waiting for the private route before retrieving any market data.'}</p>{(routeInterrupted || routeDisconnected || route?.status === 'ready') && <button className="agent-quiet-button" type="button" onClick={onReconnect}>Reconnect for market data</button>}</div> : marketLoading ? <p className={`agent-loading${privateMarketReady ? ' agent-request-pending' : ''}`} role="status" aria-busy={privateMarketReady}>Fetching the market catalogue through the worker…</p> : marketError ? <div className="agent-market-error" role="alert"><strong>Market data is unavailable.</strong><p>The venue could not provide a valid response through the worker. No direct request was attempted.</p><button className="agent-quiet-button" type="button" disabled={!privateMarketReady} onClick={reloadMarkets}>Retry market data</button><details><summary>Connection details</summary><p>{marketError}</p></details></div> : markets.length === 0 ? <p className="agent-empty">The venue returned no open markets. Refresh to check again.</p> : filtered.length === 0 ? <p className="agent-empty">No loaded markets match your search.</p> :
           <ul className="agent-market-list">{filtered.map(item => <li key={item.id}><button type="button" disabled={running || !privateMarketReady} aria-pressed={selectedId === item.id} onClick={() => selectMarket(item.id)}><strong>{item.question}</strong><small>{item.outcomes.map(outcome => outcome.name).join(' / ')} · {item.endDate ? `Closes ${new Date(item.endDate).toLocaleDateString()}` : 'No closing date provided'}</small></button></li>)}</ul>}
       </section>
-      <div><section className="agent-card agent-account-card" aria-labelledby="agent-account-title"><p className="agent-eyebrow">02 / Read the selected position</p><h2 id="agent-account-title">Context before conviction.</h2>
+      <div><section className="agent-card agent-account-card" aria-labelledby="agent-account-title"><p className="agent-eyebrow">02 / Read the selected position</p><h2 id="agent-account-title">Selected position</h2>
         <p className="agent-card-intro">Inspect a public address’s selected outcome and collateral through Anon-RPC. No wallet connection or trading permission.</p>
         {market && <p className="agent-account-selection">{market.question}<br /><strong>Outcome: {market.outcomes[outcomeIndex]?.name}</strong></p>}
         <label className="agent-field" htmlFor="agent-watch-account">Public watch address<input id="agent-watch-account" value={watchAddress} onChange={event => { invalidateAccount(); setWatchAddress(event.target.value) }} placeholder="0x…" autoComplete="off" spellCheck={false} /></label>
         <button className="agent-quiet-button" disabled={!privateReady || watchLoading || !watchAddress.trim() || !market || running} type="button" onClick={() => { void checkWatchAddress() }}>{watchLoading ? 'Reading through Anon-RPC…' : 'Read selected position privately'}</button>
         {!market && <p className="agent-card-intro" style={{ marginTop: 12 }}>Choose a market and outcome first.</p>}
-        {accountContext && <div className="agent-account-result" aria-live="polite"><div><span>Selected outcome balance · shares</span><strong title={`${accountContext.value.outcomeBalance} raw ERC-1155 units`}>{tokenUnits(accountContext.value.outcomeBalance, accountContext.value.outcomeDecimals)}</strong></div><div><span>{accountContext.value.collateralSymbol} collateral</span><strong title={`${accountContext.value.collateralBalance} raw units`}>{tokenUnits(accountContext.value.collateralBalance, accountContext.value.collateralDecimals)}</strong></div><p>Polygon block {accountContext.value.blockNumber.toLocaleString()} · Both balances from the same verified snapshot.</p><p>Outcome holdings affect the local share cap. Collateral is informational and does not fund the hypothetical paper budget.</p></div>}
+        {accountContext && <div className="agent-account-result" aria-live="polite"><div><span>Selected outcome balance · shares</span><strong title={`${accountContext.value.outcomeBalance} raw ERC-1155 units`}>{tokenUnits(accountContext.value.outcomeBalance, accountContext.value.outcomeDecimals)}</strong></div><div><span>{accountContext.value.collateralSymbol} collateral</span><strong title={`${accountContext.value.collateralBalance} raw units`}>{tokenUnits(accountContext.value.collateralBalance, accountContext.value.collateralDecimals)}</strong></div><p>Polygon block {accountContext.value.blockNumber.toLocaleString()} · Both balances from the same verified snapshot.</p><p>Outcome holdings affect the local share cap. Collateral is informational and does not fund the simulated paper budget.</p></div>}
         {watchError && <p className="agent-inline-error" role="alert">{watchError}</p>}
       </section>
-      <section className="agent-card agent-model-status" aria-labelledby="agent-model-title"><div className="agent-card-heading"><h2 id="agent-model-title">Research desk</h2><span className="agent-paper-tag">MODEL CONNECTIONS</span></div>
-        <div className="agent-model-roles"><div><span className="agent-sprite" aria-hidden="true" /><strong>0G Researcher</strong><span>{currentResearch ? 'RETURNED' : researchLoading ? 'REQUESTED' : 'NOT RUN'}</span></div><div><span className="agent-sprite" aria-hidden="true" /><strong>0G Skeptic</strong><span>{currentResearch ? 'RETURNED' : researchLoading ? 'REQUESTED' : 'NOT RUN'}</span></div></div>
+      <section className="agent-card agent-model-status" aria-labelledby="agent-model-title" data-research-state={researchLoading ? 'pending' : currentResearch ? 'returned' : researchError ? 'failed' : 'idle'}><div className="agent-card-heading"><h2 id="agent-model-title">Research desk</h2><span className="agent-paper-tag">MODEL CONNECTIONS</span></div>
+        <div className="agent-model-roles"><div><span className="agent-sprite" aria-hidden="true" /><strong>0G Researcher</strong><span>{currentResearch ? 'RETURNED' : researchLoading ? 'AWAITING RESULT' : researchError ? 'NO RESULT' : 'NOT RUN'}</span></div><div><span className="agent-sprite" aria-hidden="true" /><strong>0G Skeptic</strong><span>{currentResearch ? 'RETURNED' : researchLoading ? 'AWAITING RESULT' : researchError ? 'NO RESULT' : 'NOT RUN'}</span></div></div>
         {researchService.status === 'unknown' ? <p className="agent-card-intro" role="status">Checking the 0G research service… No model result has been accepted.</p> : researchService.status === 'error' ? <div className="agent-research-unavailable"><p>Research service unavailable. Retry its connection or choose manual paper mode.</p><button className="agent-quiet-button" type="button" onClick={() => { setResearchService({ status: 'unknown' }); setServiceRefresh(value => value + 1) }}>Retry research service</button></div> : !researchService.configured ? <p className="agent-card-intro">0G Private Computer is not configured on this server. The operator must enable inference before research can run. Manual paper mode remains available.</p> : <p className="agent-card-intro">Public market facts and retrieved evidence only. No watched address, holdings, wallet keys or risk limits are sent. {researchService.jobsRemaining} of {researchService.jobLimit} server research jobs remain.</p>}
         <div className="agent-research-actions"><button className="agent-quiet-button" type="button" disabled={researchLoading || running || !market || !book || bookLoading || researchService.status !== 'ready' || !researchService.configured || researchService.jobsRemaining < 1} onClick={() => { void runResearch() }}>Run 0G research</button>{researchLoading && <button className="agent-quiet-button" type="button" onClick={cancelResearch}>Cancel research</button>}</div>
-        {researchLoading && <p role="status" className="agent-card-intro">Requesting researcher and skeptic responses. No draft or paper order changes until you review and adopt a result.</p>}
+        {researchLoading && <p role="status" className="agent-card-intro agent-request-pending" aria-busy="true">Waiting for the pipeline result. Per-role progress is not reported. No draft or paper order changes until you review and adopt a result.</p>}
         {researchError && <p className="agent-inline-error" role="alert">{researchError}</p>}
         {currentResearch && <ResearchOutput snapshot={currentResearch} adopted={adoptedResearch === currentResearch} onAdopt={adoptResearch} disabled={running} />}
       </section>
-      <section className="agent-card agent-form-card" aria-labelledby="agent-thesis-title"><p className="agent-eyebrow">02 / Give it a thesis</p><h2 id="agent-thesis-title">Conviction, meet discipline.</h2>
+      <section className="agent-card agent-form-card" aria-labelledby="agent-thesis-title"><p className="agent-eyebrow">Review & set limits</p><h2 id="agent-thesis-title">Order review</h2>
         {!market ? <p className="agent-loading">Choose a market to begin. Your rules will stay in control.</p> : <><p className="agent-card-intro">{market.question}</p>
           <div className="agent-outcomes" aria-label="Market outcome">{market.outcomes.map((outcome, index) => <button key={outcome.tokenId} type="button" disabled={running || !privateMarketReady} aria-pressed={outcomeIndex === index} onClick={() => { clearResearch(); invalidateAccount(); setOutcomeIndex(index); setBookResult(null); setBookError(''); setBookLoading(true); setPrepared(null) }}>{outcome.name}</button>)}</div>
-          {!privateMarketReady && !book ? <p className="agent-loading" role="status">Order-book reads are paused until the private route reconnects.</p> : bookLoading || (!book && !bookError) ? <p className="agent-loading" role="status">Reading the order book through the worker…</p> : bookError ? <p className="agent-inline-error" role="alert">{bookError}</p> : book && <div className="agent-book-strip"><span>Best ask<strong>{bestAsk === undefined ? 'Unavailable' : percent(bestAsk)}</strong></span><span>Best bid<strong>{bestBid === undefined ? 'Unavailable' : percent(bestBid)}</strong></span><span>Bid/ask spread<strong>{bestAsk === undefined || bestBid === undefined ? 'Unavailable' : percent(bestAsk - bestBid)}</strong></span><span>Quote fetched<strong>{new Date(book.fetchedAt).toLocaleTimeString()}</strong></span></div>}
+          {!privateMarketReady && !book ? <p className="agent-loading" role="status">Order-book reads are paused until the private route reconnects.</p> : privateMarketReady && (bookLoading || (!book && !bookError)) ? <p className="agent-loading agent-request-pending" role="status" aria-busy="true">Reading the order book through the worker…</p> : bookError ? <p className="agent-inline-error" role="alert">{bookError}</p> : book && <div className="agent-book-strip"><span>Best ask<strong>{bestAsk === undefined ? 'Unavailable' : percent(bestAsk)}</strong></span><span>Best bid<strong>{bestBid === undefined ? 'Unavailable' : percent(bestBid)}</strong></span><span>Bid/ask spread<strong>{bestAsk === undefined || bestBid === undefined ? 'Unavailable' : percent(bestAsk - bestBid)}</strong></span><span>Quote fetched<strong>{new Date(book.fetchedAt).toLocaleTimeString()}</strong></span></div>}
           <fieldset className="agent-proposal-mode"><legend>Proposal source</legend><label><input type="radio" name="agent-proposal-mode" checked={proposalMode === 'model'} disabled={running} onChange={() => chooseProposalMode('model')} />0G research</label><label><input type="radio" name="agent-proposal-mode" checked={proposalMode === 'manual'} disabled={running} onChange={() => chooseProposalMode('manual')} />Manual paper mode</label></fieldset>
           <label className="agent-field">{proposalMode === 'model' ? 'Adopted 0G thesis' : 'Your manual thesis'}<textarea id="agent-thesis" value={draft.thesis} maxLength={2000} disabled={running} readOnly={proposalMode === 'model'} onChange={event => editDraft('thesis', event.target.value)} placeholder={proposalMode === 'model' ? 'Run and explicitly adopt matching 0G research above.' : 'Write your own reasoning. No AI output is used in manual mode.'} /></label>
-          <div className="agent-fields-row"><label className="agent-field">{proposalMode === 'model' ? 'Adopted model probability (%)' : 'Your probability (%)'}<input id="agent-probability" inputMode="decimal" value={draft.probability} disabled={running} readOnly={proposalMode === 'model'} onChange={event => editDraft('probability', event.target.value)} /><small>{proposalMode === 'model' ? 'A model estimate for human review, not a guarantee.' : 'Your estimate; this path does not use AI.'}</small></label><label className="agent-field">Paper stake (USD)<input id="agent-paper-stake" inputMode="decimal" value={draft.stake} disabled={running} onChange={event => editDraft('stake', event.target.value)} /><small>Maximum hypothetical spend per cycle.</small></label></div>
+          <label className="agent-field">Maximum per order (USD)<input id="agent-max-per-order" inputMode="decimal" value={draft.maxOrder} disabled={running} onChange={event => editDraft('maxOrder', event.target.value)} /><small>A separate cap. Increasing the paper stake does not increase this limit.</small></label>
+          <div className="agent-fields-row"><label className="agent-field">{proposalMode === 'model' ? 'Adopted model probability (%)' : 'Your probability (%)'}<input id="agent-probability" inputMode="decimal" value={draft.probability} disabled={running} readOnly={proposalMode === 'model'} onChange={event => editDraft('probability', event.target.value)} /><small>{proposalMode === 'model' ? 'A model estimate for human review, not a guarantee.' : 'Your estimate; this path does not use AI.'}</small></label><label className="agent-field">Paper stake (USD)<input id="agent-paper-stake" inputMode="decimal" value={draft.stake} disabled={running} onChange={event => editDraft('stake', event.target.value)} /><small>Maximum simulated spend per cycle.</small></label></div>
           <details className="agent-policy-details" open><summary>Budget & execution boundaries</summary><div className="agent-fields-row"><label className="agent-field">Session paper budget (USD)<input inputMode="decimal" value={draft.budget} disabled={running} onChange={event => editDraft('budget', event.target.value)} /><small>Includes {usd(ledger?.spentMicros ?? 0)} already recorded in this journal.</small></label><label className="agent-field">Expires in (minutes)<input inputMode="numeric" value={draft.expiry} disabled={running} onChange={event => editDraft('expiry', event.target.value)} /></label></div><div className="agent-fields-row"><label className="agent-field">Maximum price (%)<input inputMode="decimal" value={draft.maxPrice} disabled={running} onChange={event => editDraft('maxPrice', event.target.value)} /></label><label className="agent-field">Maximum spread (pp)<input inputMode="decimal" value={draft.maxSpread} disabled={running} onChange={event => editDraft('maxSpread', event.target.value)} /></label></div><label className="agent-field">Maximum combined outcome shares<input id="agent-max-outcome-shares" inputMode="decimal" value={draft.maxExposure} disabled={running} onChange={event => editDraft('maxExposure', event.target.value)} /><small>Onchain holdings + all paper shares for this outcome recorded in this browser + the proposed fill. Account-independent paper history is counted conservatively. Onchain dust rounds up to six-decimal share units.</small></label></details>
           <button className="agent-primary" type="button" disabled={running || !book || bookLoading || !journalResult.journal || !accountContext || proposalMode === 'model' && !modelReady} onClick={prepare}>Evaluate paper proposal <span aria-hidden="true">↗</span></button>
           {!accountContext && <p className="agent-card-intro" style={{ marginTop: 12 }}>Read this outcome’s public position through the private route before preparing a proposal.</p>}
           <button className="agent-quiet-button" style={{ marginTop: 10, color: '#d2b898' }} type="button" disabled={running || bookLoading || !privateMarketReady} onClick={() => { setBookLoading(true); setBookResult(null); setPrepared(null); setBookRefresh(value => value + 1) }}>Refresh order book</button>
-          {prepared && <div className="agent-proposal" aria-live="polite"><h3>{prepared.allowed ? 'The rules allow a paper proposal.' : 'The rules say: hold.'}</h3><p>Deterministic thesis/price rule · {percent(prepared.proposal.estimatedProbabilityMicros)} {proposalMode === 'model' ? 'adopted 0G estimate' : 'user probability'} · {usd(prepared.proposal.stakeMicros)} maximum paper spend.</p>
-            {prepared.quote && <dl className="agent-proposal-quote"><div><dt>Paper shares</dt><dd>{shares(prepared.quote.sharesMicros)}</dd></div><div><dt>Weighted ask price</dt><dd>{percent(prepared.quote.averagePriceMicros)}</dd></div><div><dt>Hypothetical cost</dt><dd>{usd(prepared.quote.spentMicros)}</dd></div><div><dt>Policy expires</dt><dd>{new Date(prepared.policy.expiresAt).toLocaleTimeString()}</dd></div></dl>}
+          {prepared && <div className="agent-proposal" data-decision={prepared.allowed ? 'allowed' : 'held'} key={prepared.proposal.id} aria-live="polite"><h3>{prepared.allowed ? 'Paper proposal allowed' : 'Paper proposal held'}</h3><p>Deterministic thesis/price rule · {percent(prepared.proposal.estimatedProbabilityMicros)} {proposalMode === 'model' ? 'adopted 0G estimate' : 'user probability'} · {usd(prepared.proposal.stakeMicros)} maximum paper spend.</p>
+            {prepared.quote && <dl className="agent-proposal-quote"><div><dt>Paper shares</dt><dd>{shares(prepared.quote.sharesMicros)}</dd></div><div><dt>Weighted ask price</dt><dd>{percent(prepared.quote.averagePriceMicros)}</dd></div><div><dt>Simulated cost</dt><dd>{usd(prepared.quote.spentMicros)}</dd></div><div><dt>Policy expires</dt><dd>{new Date(prepared.policy.expiresAt).toLocaleTimeString()}</dd></div></dl>}
             {prepared.reasons.length > 0 && <ul>{prepared.reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>}<p>Prices and displayed size are checked again before recording a paper fill. Fees, queue priority and actual venue matching are not modeled.</p></div>}</>}
         {(formError || journalResult.error) && <p className="agent-inline-error" role="alert">{formError || journalResult.error}</p>}
       </section>
-      <section className="agent-card agent-runner" aria-labelledby="agent-runner-title"><div className="agent-runner-top"><h2 id="agent-runner-title">Agent activity</h2><span className={`agent-run-state ${running ? 'running' : ''}`}><span />{running ? 'PAPER ACTIVE' : 'PAPER STOPPED'}</span></div><p className="agent-card-intro">Deterministic checks every 30 seconds while this page stays open. No background service and no real venue orders.</p>
-        <div className="agent-run-controls"><button className="agent-primary" type="button" disabled={running || !privateReady || !prepared?.allowed || !journalResult.journal || !market || !book || bookLoading || !accountContext || proposalMode === 'model' && !modelReady} onClick={() => { void start() }}>Start paper checks <span aria-hidden="true">↗</span></button><button className="agent-stop" type="button" disabled={!running} onClick={() => { void stop() }}>Kill switch</button></div><p className="agent-run-message" role="status" aria-live="polite">{runMessage}</p>{routeError && <p className="agent-inline-error">{routeError}</p>}
+      <AgentMandatePanel policy={prepared?.policy ?? null} marketId={market?.id ?? null} watchedAccount={accountContext?.value.account ?? null} journal={journalResult.journal} running={running} onStop={stop} onPendingChange={setMandatePending} onChanged={() => { setLedger(journalResult.journal?.snapshot() ?? null); refreshMandate(value => value + 1) }} />
+      <section className="agent-card agent-runner" aria-labelledby="agent-runner-title"><div className="agent-runner-top"><h2 id="agent-runner-title">Agent activity</h2><span className={`agent-run-state ${running ? cycleNetworkBusy ? 'checking' : 'scheduled' : ''}`}><span />{running ? cycleNetworkBusy ? 'PAPER CHECKING' : cyclePhase === 'policy' ? 'PAPER REVIEWING' : 'PAPER WAITING' : 'PAPER STOPPED'}</span></div><p className="agent-card-intro">Deterministic checks every 30 seconds while this page stays open. No background service and no real venue orders.</p>
+        <div className="agent-run-controls"><button className="agent-primary" type="button" disabled={running || mandatePending || !signedMandate || !privateReady || !prepared?.allowed || !journalResult.journal || !market || !book || bookLoading || !accountContext || proposalMode === 'model' && !modelReady} onClick={() => { void start() }}>Start paper checks <span aria-hidden="true">↗</span></button><button className="agent-stop" type="button" disabled={!running} onClick={() => { void stop() }}>Kill switch</button></div><p className="agent-run-message" role="status" aria-live="polite">{runMessage}</p>{routeError && <p className="agent-inline-error">{routeError}</p>}
       </section></div>
     </div>
-    <section className="agent-card agent-ledger" aria-labelledby="agent-journal-title"><div className="agent-ledger-heading"><h2 id="agent-journal-title">A paper trail. Literally.</h2><span>{records.length} paper {records.length === 1 ? 'fill' : 'fills'} · {usd(ledger?.spentMicros ?? 0)} hypothetical spend</span></div>
-      {records.length === 0 ? <p className="agent-empty">No paper fills recorded. A proposal appears here only after it passes the policy and is saved locally.</p> : <ol className="agent-records">{[...records].reverse().map(record => <li className="agent-record" key={record.id}><div><h3>{record.question}</h3><p><span className="agent-paper-tag">PAPER FILL</span> · {record.outcome} · {shares(record.sharesMicros)} shares · average {percent(record.averagePriceMicros)}</p></div><div className="agent-record-side"><strong>{usd(record.spentMicros)}</strong><span>{new Date(record.executedAt).toLocaleString()}</span></div></li>)}</ol>}
+    <section className="agent-card agent-ledger" aria-labelledby="agent-journal-title"><div className="agent-ledger-heading"><h2 id="agent-journal-title">Paper activity</h2><span>{records.length} paper {records.length === 1 ? 'fill' : 'fills'} · {usd(ledger?.spentMicros ?? 0)} simulated spend</span></div>
+      {records.length === 0 ? <p className="agent-empty">No paper fills recorded. A proposal appears here only after it passes the policy and is saved locally.</p> : <ol className="agent-records">{[...records].reverse().map(record => <li className="agent-record" key={record.id}><div><h3>{record.question}</h3><p><span className="agent-paper-tag">PAPER FILL</span> · {record.outcome} · {shares(record.sharesMicros)} shares · average {percent(record.averagePriceMicros)}</p><details className="agent-record-policy"><summary>Policy evidence</summary>{record.mandateDigest ? <p>Verified policy digest: <code>{record.mandateDigest}</code></p> : <p>No signed mandate is attached to this earlier simulation.</p>}</details></div><div className="agent-record-side"><strong>{usd(record.spentMicros)}</strong><span>{new Date(record.executedAt).toLocaleString()}</span></div></li>)}</ol>}
     </section>
-    <details className="agent-privacy"><summary>What is private here, and what is not?</summary><p>Market discovery and order-book HTTP requests use the selected Anon-RPC worker; there is no direct venue fallback. The selected account’s Polygon outcome-token and collateral RPC reads also use the worker at one block. Fresh outcome holdings enforce your combined share cap locally before proposal review and every paper commit. All paper shares for the same outcome in this browser are counted, regardless of watched account. Collateral is informational; it does not fund paper purchases. If the private route fails, new market reads and paper execution stop. Completed public research remains available.</p><p>0G research is separate: public market metadata and retrieved evidence go through our application proxy, which sees plaintext. No account context, wallet keys or risk limits are included. Research is for human review and cannot change limits or place orders. Manual paper mode uses your own thesis, not AI. The local paper journal excludes watched addresses, holdings and thesis. No venue order, signature or transfer is made. Source links open outside the worker. Onchain data remains public; worker success does not prove anonymity. Paper fills exclude fees and do not change onchain balances.</p>
+    <details className="agent-privacy"><summary>Privacy coverage</summary><p>Market and selected-account reads use Anon-RPC. Research sends public evidence through the app server and 0G separately. Your account and limits are excluded from those model inputs. Setup and source links use separate connections; public onchain activity stays public.</p><p>Orders are simulated. A wallet signature authorizes this browser’s paper policy; it grants no token allowance or transaction signing key.</p>
       <p><a href="https://docs.polymarket.com/" target="_blank" rel="noreferrer">Polymarket API documentation ↗</a> · <a href="https://ethereum.github.io/anon-rpc/wallets/" target="_blank" rel="noreferrer">Anon-RPC integration guide ↗</a></p>
     </details>
   </main>
