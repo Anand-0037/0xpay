@@ -26,10 +26,22 @@ export function storedVault(): StoredVault | null {
 }
 
 async function railgunWallet(vault: StoredVault, mnemonic: string, sdkKey: string) {
-  const [{ createRailgunWallet, loadWalletByID }, { NetworkName }] = await Promise.all([
+  const [{ createRailgunWallet, loadWalletByID, unloadWalletByID }, { NetworkName }] = await Promise.all([
     import('@railgun-community/wallet'), import('@railgun-community/shared-models'),
   ])
-  if (vault.walletId) return loadWalletByID(sdkKey, vault.walletId, false)
+  if (vault.walletId) {
+    try { return await loadWalletByID(sdkKey, vault.walletId, false) }
+    catch {
+      // The browser may evict the SDK database while retaining our encrypted vault.
+      // Recreate only if the decrypted phrase derives the exact stored wallet ID.
+      const restored = await createRailgunWallet(sdkKey, mnemonic, { [NetworkName.EthereumSepolia]: vault.creationBlock })
+      if (restored.id !== vault.walletId) {
+        unloadWalletByID(restored.id)
+        throw new Error('Private wallet metadata does not match this recovery phrase')
+      }
+      return restored
+    }
+  }
   const info = await createRailgunWallet(sdkKey, mnemonic, { [NetworkName.EthereumSepolia]: vault.creationBlock })
   vault.walletId = info.id
   return info
