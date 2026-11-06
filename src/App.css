@@ -118,6 +118,78 @@
 .backup-check button { grid-column: 1 / -1; justify-self: start; }
 .wallet-error { color: #ffad9e !important; font-weight: 650; }
 
+/* The first screen presents the wallet action beside a short product introduction. */
+.wallet-panel.wallet-onboarding { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr); align-items: start; gap: clamp(28px, 5vw, 68px); width: 100%; padding: 18px 0; border: 0; background: transparent; box-shadow: none; }
+.wallet-intro { padding: 30px 0 0; }
+.wallet-intro .eyebrow { margin-bottom: 22px; }
+.wallet-intro h1 { margin: 0; color: var(--ink); font-size: clamp(42px, 5.1vw, 64px); line-height: 1.06; letter-spacing: -.055em; font-weight: 740; }
+.wallet-intro h1 span { color: var(--accent); }
+.wallet-intro-lead { max-width: 390px; margin: 23px 0 0; color: #b8b7bb; font-size: 16px; line-height: 1.75; }
+.wallet-journey { display: grid; gap: 23px; margin: 38px 0 0; padding: 0; list-style: none; }
+.wallet-journey li { display: flex; align-items: start; gap: 16px; }
+.wallet-journey li > span { display: grid; place-items: center; width: 33px; height: 33px; flex: none; border: 1px solid #514033; border-radius: 10px; background: #211c19; color: #ffb582; font-size: 11px; font-weight: 700; }
+.wallet-journey strong { display: block; margin-top: 2px; font-size: 14px; font-weight: 650; }
+.wallet-journey p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.wallet-setup-card { min-width: 0; padding: clamp(26px, 3vw, 38px); border: 1px solid #3d3a3a; border-radius: 22px; background: var(--panel); box-shadow: 0 22px 60px rgb(0 0 0 / 18%); }
+.wallet-setup-card .eyebrow { margin-bottom: 12px; }
+.wallet-panel .wallet-setup-card h2 { font-size: clamp(27px, 3vw, 34px); letter-spacing: -.04em; }
+.wallet-setup-copy { margin: 17px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.wallet-setup-card .wallet-tabs { flex-wrap: nowrap; gap: 4px; margin: 27px 0 0; padding: 4px; border: 1px solid #3e3e44; border-radius: 12px; background: #141519; }
+.wallet-setup-card .wallet-tabs button { flex: 1; min-width: 0; min-height: 39px; padding: 8px; border-color: transparent; background: transparent; font-size: 12px; }
+.wallet-setup-card .wallet-tabs button[aria-pressed="true"] { border-color: #605044; background: #38271e; color: #ffd1af; }
+.wallet-setup-card .wallet-form { margin-top: 25px; gap: 22px; }
+.wallet-setup-card .wallet-form > button { width: 100%; min-height: 48px; margin-top: 0; }
+.wallet-setup-connection { display: block; margin-top: 19px; color: #bcb1aa; font-size: 12px; line-height: 1.6; }
+.wallet-setup-footnote { margin: 22px 0 0; padding-top: 19px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; text-align: center; }
+.wallet-setup-card > .wallet-error { margin: 18px 0 0; font-size: 12px; line-height: 1.65; }
+.wallet-content > p { max-width: 650px; margin: 20px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.wallet-active .wallet-panel-heading > div > h2 { font-size: 34px; letter-spacing: -.045em; }
+.wallet-overview { margin-top: 27px; }
+.funding-card { padding: clamp(23px, 3vw, 32px); border: 1px solid #514437; border-radius: 17px; background: #211f1e; }
+.funding-card-top { display: flex; align-items: start; justify-content: space-between; gap: 15px; }
+.funding-card .eyebrow { display: block; margin-bottom: 10px; font-size: 10px; }
+.funding-card h3 { margin: 0; font-size: 20px; letter-spacing: -.025em; }
+.funding-amount { display: block; margin-top: 22px; font-size: clamp(24px, 3vw, 36px); font-weight: 650; line-height: 1.2; letter-spacing: -.035em; overflow-wrap: anywhere; }
+.funding-card > p { margin: 18px 0 12px; color: #bdb7b3; font-size: 12px; line-height: 1.6; }
+.funding-address { display: block; padding: 14px; border: 1px solid #4c4440; border-radius: 10px; background: #171718; color: #e9dcd3; font: 12px/1.7 ui-monospace, monospace; overflow-wrap: anywhere; user-select: all; }
+.funding-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 17px; }
+.wallet-panel .quiet-action { min-height: 33px; padding: 6px 10px; background: transparent; font-size: 11px; }
+.button-link { display: inline-flex; align-items: center; justify-content: center; gap: 12px; min-height: 42px; padding: 9px 16px; border: 1px solid #4b4b52; border-radius: 10px; color: var(--ink); font-size: 13px; font-weight: 700; text-decoration: none; }
+.button-link.primary { border-color: var(--accent); background: var(--accent); color: #1b120d; }
+.button-link.primary:hover { background: var(--accent-hover); }
+.receive-details { margin-top: 12px; padding: 19px 22px; border: 1px solid var(--line); border-radius: 13px; background: #17181c; }
+.receive-details summary { color: #ded9d5; font-size: 13px; font-weight: 650; cursor: pointer; }
+.receive-details summary span { margin-left: 12px; color: var(--muted); font-size: 11px; font-weight: 450; }
+.receive-details p { margin: 18px 0 12px; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.receive-details code { display: block; margin-bottom: 15px; color: #e8dace; font: 11px/1.7 ui-monospace, monospace; overflow-wrap: anywhere; user-select: all; }
+.wallet-content > .wallet-privacy-note { margin: 17px 3px 0; font-size: 11px; line-height: 1.65; }
+.wallet-content > details:not(.receive-details) { margin-top: 24px; }
+.wallet-content > details > summary { color: #e5d2c3; font-size: 13px; font-weight: 650; cursor: pointer; }
+.wallet-content > details > .shield-panel { margin-top: 15px; }
+.wallet-panel a:focus-visible, .wallet-panel summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
+@media (max-width: 900px) {
+  .wallet-panel.wallet-onboarding { gap: 28px; }
+  .wallet-intro h1 { font-size: 45px; }
+  .wallet-intro-lead { font-size: 14px; }
+  .wallet-setup-card { padding: 28px 24px; }
+}
+@media (max-width: 720px) {
+  .wallet-panel.wallet-onboarding { grid-template-columns: 1fr; gap: 27px; padding: 0; }
+  .wallet-intro { padding: 8px 3px 0; }
+  .wallet-intro .eyebrow { margin-bottom: 15px; }
+  .wallet-intro h1 { font-size: clamp(37px, 9vw, 52px); }
+  .wallet-intro-lead { max-width: 430px; margin-top: 17px; font-size: 14px; }
+  .wallet-journey { display: none; }
+  .wallet-setup-card { padding: 27px 23px; border-radius: 17px; }
+  .wallet-active .wallet-panel-heading > div > h2 { font-size: 29px; }
+  .funding-card { padding: 23px 18px; }
+  .funding-address { font-size: 11px; }
+  .funding-actions > * { flex: 1; }
+  .receive-details { padding: 17px; }
+  .receive-details summary span { display: block; margin: 6px 0 0 17px; }
+}
+
 .shield-panel { width: min(100%, 940px); margin: 30px auto 0; padding: clamp(24px, 4vw, 40px); border: 1px solid var(--line); border-radius: 22px; background: var(--panel); }
 .shield-panel h2 { margin: 0; font-size: clamp(27px, 3.5vw, 38px); letter-spacing: -.045em; }
 .shield-explainer { max-width: 670px; margin: 15px 0 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
@@ -167,6 +239,27 @@
 .private-balance-grid span { color: var(--muted); font-size: 11px; font-weight: 700; }
 .private-balance-grid strong { font-size: 15px; line-height: 1.35; overflow-wrap: anywhere; }
 .private-balance-note { max-width: 700px; margin: 23px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+
+/* The private balance and payment action lead; public gas is a secondary detail. */
+.wallet-active .private-balance { margin-top: 25px; border-color: #65462e; background: linear-gradient(125deg, #29211b, #1c1d21 75%); }
+.wallet-active .private-balance h2 { font-size: 18px; font-weight: 550; letter-spacing: -.02em; color: #d1c4ba; }
+.private-balance-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px; margin-top: 25px; }
+.private-balance-total strong { color: var(--ink); font-size: clamp(33px, 5.5vw, 56px); line-height: 1.1; font-weight: 690; letter-spacing: -.055em; overflow-wrap: anywhere; }
+.private-balance-total > span { color: #c6b7ab; font-size: 16px; font-weight: 600; }
+.private-balance-details { margin-top: 22px; padding-top: 17px; border-top: 1px solid #493a30; }
+.private-balance-details > summary { color: #baafa8; font-size: 12px; cursor: pointer; }
+.exact-private-balance { margin: 18px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.exact-private-balance code { color: var(--ink); }
+.wallet-active .send-panel { margin-top: 23px; border-color: #655044; }
+.wallet-active .wallet-overview { margin-top: 22px; }
+.funding-details { padding: 17px 20px; border: 1px solid var(--line); border-radius: 13px; background: #17181b; }
+.funding-details > summary { color: #d4cec9; cursor: pointer; font-size: 12px; font-weight: 600; line-height: 1.8; }
+.funding-details > summary > span { margin-left: 12px; color: #a9a19a; font-size: 12px; font-weight: 450; white-space: nowrap; }
+.funding-details > .funding-card { margin-top: 17px; padding: 20px 0 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
+.funding-details .funding-amount { font-size: 25px; }
+.exact-balance { margin-top: 10px; color: var(--muted); font-size: 11px; }
+.exact-balance > summary { cursor: pointer; }
+.exact-balance > code { display: block; margin-top: 9px; color: var(--ink); overflow-wrap: anywhere; }
 
 .send-panel { width: min(100%, 940px); margin: 30px auto 0; padding: clamp(24px, 4vw, 40px); border: 1px solid var(--line); border-radius: 22px; background: var(--panel); }
 .send-panel h2 { margin: 0; font-size: clamp(27px, 3.5vw, 38px); letter-spacing: -.045em; }

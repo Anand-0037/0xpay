@@ -43,7 +43,6 @@ export function SendPanel({ onQuote, onSubmit, onConfirm }: SendPanelProps) {
   const [amount, setAmount] = useState('')
   const [stage, setStage] = useState<Stage>('draft')
   const [quote, setQuote] = useState<PrivateSendQuote | null>(null)
-  const [proofProgress, setProofProgress] = useState<number | null>(null)
   const [transactionHash, setTransactionHash] = useState<string | null>(null)
   const [receipt, setReceipt] = useState<PrivateSendReceipt | null>(null)
   const [error, setError] = useState('')
@@ -61,7 +60,6 @@ export function SendPanel({ onQuote, onSubmit, onConfirm }: SendPanelProps) {
     setRecipient(nextRecipient)
     setAmount(nextAmount)
     setQuote(null)
-    setProofProgress(null)
     setTransactionHash(null)
     setReceipt(null)
     setError('')
@@ -107,17 +105,13 @@ export function SendPanel({ onQuote, onSubmit, onConfirm }: SendPanelProps) {
   async function submit() {
     if (stage !== 'review' || !quote) return
     const currentId = ++requestId.current
-    setProofProgress(null)
     setError('')
     setStage('preparing')
     try {
-      const submission = await onSubmit(quote, (progress, _status) => {
-        if (!mounted.current || requestId.current !== currentId ||
-            !Number.isFinite(progress) || progress < 0 || progress > 100) return
-        setProofProgress(progress)
-      })
+      // snarkjs's SDK adapter reports timer-derived percentages, not measured work.
+      const submission = await onSubmit(quote, () => {})
       if (!mounted.current || requestId.current !== currentId) return
-      if (submission.status !== 'submitted' || !validHash(submission.transactionHash)) {
+      if ((submission.status !== 'submitted' && submission.status !== 'broadcast-unknown') || !validHash(submission.transactionHash)) {
         throw new Error('The wallet did not return a valid transaction hash.')
       }
       setTransactionHash(submission.transactionHash)
@@ -144,7 +138,7 @@ export function SendPanel({ onQuote, onSubmit, onConfirm }: SendPanelProps) {
   return <section className="send-panel" aria-labelledby="send-heading">
     <p className="eyebrow">PRIVATE TRANSFER</p>
     <h2 id="send-heading">Send WETH privately</h2>
-    <p className="send-explainer">Send from your RAILGUN balance to another 0zk wallet. Your connected public wallet pays Sepolia gas and will be visible as the transaction sender onchain.</p>
+    <p className="send-explainer">Pay another 0zk wallet from your private balance. Your funding account pays Sepolia gas and remains visible as the transaction sender onchain.</p>
 
     {stage === 'confirmed' && receipt?.status === 'confirmed' ? <div className="send-result" role="status">
       <strong>Private send confirmed</strong>
@@ -174,8 +168,8 @@ export function SendPanel({ onQuote, onSubmit, onConfirm }: SendPanelProps) {
         <p>The transfer contents are encrypted, but this public gas payer can be linked to the transaction. This flow does not use a broadcaster.</p>
         <p>Review valid until {new Date(quote.expiresAt).toLocaleTimeString()}.</p>
         {stage === 'review' && <div className="send-actions"><button type="button" onClick={() => edit(recipient, amount)}>Edit</button><button className="primary" type="button" onClick={() => void submit()}>Prove and send</button></div>}
-        {stage === 'preparing' && <div className="send-progress" role="status"><p>Preparing RAILGUN proof and transaction. Your wallet approval follows.</p>{proofProgress !== null && <><progress value={proofProgress} max="100" aria-label="RAILGUN proof progress" /><span>SDK proof progress: {Math.floor(proofProgress)}%</span></>}</div>}
-        {stage === 'pending' && <p className="send-progress" role="status">Transaction submitted. Waiting for the Sepolia receipt…</p>}
+        {stage === 'preparing' && <div className="send-progress" role="status"><p>Preparing proof, then signing on this device and broadcasting through the private route.</p><progress aria-label="Preparing private transaction" /></div>}
+        {stage === 'pending' && <p className="send-progress" role="status">Checking the signed transaction for Sepolia confirmation…</p>}
         {transactionHash && <a className="send-explorer" href={`https://sepolia.etherscan.io/tx/${transactionHash}`} target="_blank" rel="noopener noreferrer">View submitted transaction ↗</a>}
         {journalWarning && <p role="alert">This browser could not save the transaction. Keep its hash before closing this page.</p>}
       </div>}

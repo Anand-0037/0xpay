@@ -11,7 +11,7 @@ import './App.css'
 
 type RouteState =
   | { status: 'connecting'; stats: RouteStats }
-  | { status: 'ready'; blockNumber: number; stats: RouteStats }
+  | { status: 'ready'; blockNumber: number; generation: number; stats: RouteStats }
   | { status: 'failed'; message: string; stats: RouteStats }
 type EngineState =
   | { status: 'waiting' | 'starting' }
@@ -44,7 +44,7 @@ function App() {
       finally { provider.destroy() }
       if (ethersBlock < blockNumber) throw new Error('RPC returned an older block')
       if (rpcRef.current !== rpc || uiGeneration.current !== generation) return
-      setRoute({ status: 'ready', blockNumber: ethersBlock, stats: rpc.stats })
+      setRoute({ status: 'ready', blockNumber: ethersBlock, generation, stats: rpc.stats })
       if (engineReady.current) return
       startingEngine = true
       setEngine({ status: 'starting' })
@@ -93,9 +93,17 @@ function App() {
     if (engine.status === 'failed' && engine.reload) { window.location.reload(); return }
     if (rpcRef.current) void connectRoute(rpcRef.current, true)
   }
+  const disconnectRoute = () => {
+    const rpc = rpcRef.current
+    if (!rpc) return
+    uiGeneration.current += 1
+    unbindEthersRoute(rpc)
+    rpc.disconnect()
+    setRoute({ status: 'failed', message: 'Private route disconnected. Reconnect to resume requests.', stats: rpc.stats })
+  }
   const routeLabel = route.status === 'ready'
-    ? `Private route · Nym · ${route.stats.completed}/${route.stats.attempted} reads`
-    : route.status === 'connecting' ? 'Connecting private route…' : 'Private route down'
+    ? 'Private connection · Nym'
+    : route.status === 'connecting' ? 'Connecting privately…' : 'Connection interrupted'
 
   return <div className="app-shell">
     <header className="app-header">
@@ -104,13 +112,13 @@ function App() {
       <button type="button" className={`route-chip ${route.status}`} aria-expanded={connectionOpen} aria-controls="connection-details" onClick={() => setConnectionOpen(true)}>
         <span className="route-dot" aria-hidden="true" />{routeLabel}
       </button>
-      <span className="wallet-status">{wallet ? 'Private balance unlocked' : 'Private balance locked'}</span>
+      {wallet && <span className="wallet-status">Wallet unlocked</span>}
     </header>
 
-    <ConnectionDetails open={connectionOpen} route={route} engine={engine} traffic={trafficSnapshot()} onClose={() => setConnectionOpen(false)} onReconnect={retryRoute} />
+    <ConnectionDetails open={connectionOpen} route={route} engine={engine} traffic={trafficSnapshot()} onClose={() => setConnectionOpen(false)} onReconnect={retryRoute} onDisconnect={disconnectRoute} />
 
     <main className="wallet-main">
-      <WalletPanel blockNumber={route.status === 'ready' ? route.blockNumber : null} engineReady={engine.status === 'ready'} shieldFeeBasisPoints={engine.status === 'ready' ? engine.shieldFeeBasisPoints : null} connectionFailed={route.status === 'failed' || engine.status === 'failed'} onRetry={retryRoute} session={wallet} onSession={setWallet} />
+      <WalletPanel routeVersion={route.status === 'ready' ? route.generation : -1} blockNumber={route.status === 'ready' ? route.blockNumber : null} engineReady={engine.status === 'ready'} shieldFeeBasisPoints={engine.status === 'ready' ? engine.shieldFeeBasisPoints : null} connectionFailed={route.status === 'failed' || engine.status === 'failed'} onRetry={retryRoute} session={wallet} onSession={setWallet} />
       {engine.status === 'failed' && engine.reload && <div className="route-error" role="alert">{engine.message} <button type="button" onClick={retryRoute}>Refresh app</button></div>}
       {wallet && route.status === 'failed' && <div className="route-error" role="alert">Private route is down. No direct RPC fallback is used. <button type="button" onClick={retryRoute}>Reconnect</button></div>}
     </main>

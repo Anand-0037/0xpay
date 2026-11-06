@@ -6,11 +6,11 @@ import {
 import {
   gasEstimateForShieldBaseToken, getShieldPrivateKeySignatureMessage, populateShieldBaseToken,
 } from '@railgun-community/wallet'
-import { APP_RPC_URL } from '../rpc'
-import { assertPrivateRouteReady } from '../rpc/ethers-transport'
-import { findTransaction, markTransaction, recordSubmitted, unresolvedTransaction } from '../domain/tx-journal'
-import { getConnectedInjectedSigner } from '../wallet/injected'
-import { unlockedWalletId } from '../wallet/lifecycle'
+import { APP_RPC_URL } from '../rpc.ts'
+import { assertPrivateRouteReady } from '../rpc/ethers-transport.ts'
+import { findTransaction, markTransaction, unresolvedTransaction } from '../domain/tx-journal.ts'
+import { getFundingSigner, sendFundingTransaction } from '../wallet/funding.ts'
+import { unlockedWalletId, unlockedSessionVersion, assertUnlockedSession } from '../wallet/lifecycle.ts'
 
 const NETWORK = NetworkName.EthereumSepolia
 const REVIEW_LIFETIME_MS = 120_000
@@ -28,12 +28,12 @@ export type ShieldQuote = {
   expiresAt: number
 }
 
-export type ShieldSubmission = { status: 'submitted'; transactionHash: string; explorerUrl: string; journalSaved: boolean }
+export type ShieldSubmission = { status: 'submitted' | 'broadcast-unknown'; transactionHash: string; explorerUrl: string; journalSaved: boolean }
 export type ShieldReceipt =
   | { status: 'confirmed' | 'reverted'; transactionHash: string; explorerUrl: string; blockNumber: number }
   | { status: 'unknown'; transactionHash: string; explorerUrl: string; message: string }
 
-type PendingShield = { quote: ShieldQuote; walletId: string; shieldKey: string; gasDetails: TransactionGasDetailsType2 }
+type PendingShield = { quote: ShieldQuote; walletId: string; sessionVersion: number; shieldKey: string; gasDetails: TransactionGasDetailsType2 }
 let pendingShield: PendingShield | null = null
 let submitting = false
 const submittedShields = new Map<string, { sourceAddress: string }>()
@@ -58,13 +58,14 @@ export async function quoteEthShield(amountWei: bigint, recipientAddress: string
   if (unresolvedTransaction('shield')) throw new Error('A previous shield is unresolved. Check its transaction before sending another.')
   pendingShield = null
   const walletId = unlockedWalletId()
+  const sessionVersion = unlockedSessionVersion()
 
-  const signer = await getConnectedInjectedSigner()
+  const signer = await getFundingSigner()
   const sourceAddress = getAddress(await signer.getAddress())
-  // The browser wallet signs this SDK-defined message. The signature never leaves this module.
+  // The selected funding wallet signs the SDK-defined message on device.
   const signature = await signer.signMessage(getShieldPrivateKeySignatureMessage())
-  const checkedSigner = await getConnectedInjectedSigner()
-  if (getAddress(await checkedSigner.getAddress()) !== sourceAddress) throw new Error('Browser wallet account changed during review')
+  const checkedSigner = await getFundingSigner()
+  if (getAddress(await checkedSigner.getAddress()) !== sourceAddress) throw new Error('Funding wallet changed during review')
   const shieldKey = keccak256(signature)
   const wrappedAddress = NETWORK_CONFIG[NETWORK].baseToken.wrappedAddress
   const { gasEstimate } = await gasEstimateForShieldBaseToken(
@@ -91,7 +92,8 @@ export async function quoteEthShield(amountWei: bigint, recipientAddress: string
       maxNetworkFeeWei, publicBalanceWei, sourceAddress,
       recipientAddress, expiresAt: Date.now() + REVIEW_LIFETIME_MS,
     }
-    pendingShield = { quote, walletId, shieldKey, gasDetails }
+    assertUnlockedSession(walletId, sessionVersion)
+    pendingShield = { quote, walletId, sessionVersion, shieldKey, gasDetails }
     return quote
   } finally { provider.destroy() }
 }
@@ -103,8 +105,8 @@ export async function submitEthShield(quote: ShieldQuote): Promise<ShieldSubmiss
   if (Date.now() > draft.quote.expiresAt) { pendingShield = null; throw new Error('Shield review expired. Get a fresh estimate.') }
   submitting = true
   try {
-    const signer = await getConnectedInjectedSigner()
-    if (getAddress(await signer.getAddress()) !== draft.quote.sourceAddress) throw new Error('Browser wallet account changed. Review again.')
+    const signer = await getFundingSigner()
+    if (getAddress(await signer.getAddress()) !== draft.quote.sourceAddress) throw new Error('Funding wallet changed. Review again.')
     const provider = privateProvider()
     try {
       const [feeData, balance] = await Promise.all([
@@ -128,12 +130,11 @@ export async function submitEthShield(quote: ShieldQuote): Promise<ShieldSubmiss
     // An extension may broadcast before reporting a transport error. Never reuse this draft.
     assertPrivateRouteReady()
     if (unlockedWalletId() !== draft.walletId) throw new Error('Private wallet changed before shielding')
-    const sent = await signer.sendTransaction({ ...transaction, chainId: 11155111 })
+    const sent = await sendFundingTransaction(transaction, draft.quote.sourceAddress, draft.walletId, 'shield', draft.sessionVersion)
     submittedShields.set(sent.hash, { sourceAddress: draft.quote.sourceAddress })
-    let journalSaved = true
-    try { recordSubmitted('shield', sent.hash, draft.quote.sourceAddress) }
-    catch { journalSaved = false }
-    return { status: 'submitted', transactionHash: sent.hash, explorerUrl: `${EXPLORER_URL}${sent.hash}`, journalSaved }
+    // The funding layer persists signed bytes before broadcasting or throws.
+    // Do not overwrite its uncertain-outcome state with a second journal write.
+    return { status: sent.broadcastUnknown ? 'broadcast-unknown' : 'submitted', transactionHash: sent.hash, explorerUrl: `${EXPLORER_URL}${sent.hash}`, journalSaved: true }
   } finally { submitting = false }
 }
 
@@ -151,7 +152,8 @@ export async function confirmEthShield(transactionHash: string): Promise<ShieldR
       if (saved) try { markTransaction(transactionHash, 'unknown') } catch { /* receipt remains authoritative */ }
       return { status: 'unknown', transactionHash, explorerUrl: `${EXPLORER_URL}${transactionHash}`, message: 'Confirmation is still pending. Check the explorer and retry.' }
     }
-    if (!receipt.to || getAddress(receipt.to) !== getAddress(NETWORK_CONFIG[NETWORK].relayAdaptContract) ||
+    if (receipt.hash.toLowerCase() !== transactionHash.toLowerCase() || (receipt.status !== 0 && receipt.status !== 1) ||
+      !receipt.to || getAddress(receipt.to) !== getAddress(NETWORK_CONFIG[NETWORK].relayAdaptContract) ||
       getAddress(receipt.from) !== submitted.sourceAddress) throw new Error('Confirmed transaction does not match this shield')
     const status = receipt.status === 1 ? 'confirmed' : 'reverted'
     if (saved) try { markTransaction(transactionHash, status) } catch { /* receipt remains authoritative */ }

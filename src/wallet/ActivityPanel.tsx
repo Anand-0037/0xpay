@@ -3,10 +3,12 @@ import { readTransactions, type TransactionKind, type TransactionRecord } from '
 
 type Props = {
   routeReady: boolean
+  fundingAddress?: string
+  onRebroadcast?: (hash: string) => Promise<void>
   onRecheck: (kind: TransactionKind, hash: string) => Promise<void>
 }
 
-export function ActivityPanel({ routeReady, onRecheck }: Props) {
+export function ActivityPanel({ routeReady, fundingAddress, onRebroadcast, onRecheck }: Props) {
   const [error, setError] = useState('')
   const [checking, setChecking] = useState<string | null>(null)
   const [, setRevision] = useState(0)
@@ -25,6 +27,15 @@ export function ActivityPanel({ routeReady, onRecheck }: Props) {
     finally { setChecking(null) }
   }
 
+  async function rebroadcast(hash: string) {
+    if (!routeReady || checking || !onRebroadcast) return
+    setChecking(hash)
+    setError('')
+    try { await onRebroadcast(hash) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not resend this signed transaction') }
+    finally { setRevision((value) => value + 1); setChecking(null) }
+  }
+
   if (!snapshot.entries.length && !error && !snapshot.error) return null
 
   return <section className="activity-panel" aria-labelledby="activity-heading">
@@ -37,6 +48,13 @@ export function ActivityPanel({ routeReady, onRecheck }: Props) {
         <button type="button" disabled={!routeReady || checking !== null} onClick={() => void recheck(entry.kind, entry.hash)}>
           {checking === entry.hash ? 'Checking…' : 'Check confirmation'}
         </button>}
+      {(entry.status === 'submitted' || entry.status === 'unknown') && entry.signedTransaction &&
+        fundingAddress?.toLowerCase() === entry.from.toLowerCase() && onRebroadcast && <>
+          <p>Resend the exact saved transaction if its broadcast was interrupted. This keeps the same payment and nonce.</p>
+          <button type="button" disabled={!routeReady || checking !== null} onClick={() => void rebroadcast(entry.hash)}>
+            {checking === entry.hash ? 'Working…' : 'Resend same signed transaction'}
+          </button>
+        </>}
     </li>)}</ul>
   </section>
 }

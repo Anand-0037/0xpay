@@ -98,7 +98,7 @@ export function ShieldPanel({ onQuote, onSubmit, onConfirm }: ShieldPanelProps) 
     try {
       const result = await onSubmit(reviewedQuote)
       if (!mounted.current || requestId.current !== currentId) return
-      if (result.status !== 'submitted' || !validHash(result.transactionHash)) {
+      if ((result.status !== 'submitted' && result.status !== 'broadcast-unknown') || !validHash(result.transactionHash)) {
         throw new Error('The wallet did not return a valid transaction hash.')
       }
       setTransactionHash(result.transactionHash)
@@ -151,7 +151,7 @@ export function ShieldPanel({ onQuote, onSubmit, onConfirm }: ShieldPanelProps) 
         <label htmlFor="shield-eth-amount">Amount to shield</label>
         <div className="shield-amount-row"><input id="shield-eth-amount" type="text" inputMode="decimal" autoComplete="off" placeholder="0.00" value={amount} onChange={(event) => editAmount(event.target.value)} disabled={stage === 'submitting' || stage === 'pending' || stage === 'unknown'} aria-describedby="shield-amount-help" /><span>ETH</span></div>
         <small id="shield-amount-help">Sepolia test ETH · up to 18 decimal places</small>
-        <small>Reviewing asks your browser wallet to sign a RAILGUN setup message. It does not send a transaction.</small>
+        <small>Reviewing signs a RAILGUN setup message on this device. It does not send a transaction.</small>
         {stage === 'draft' && <button className="primary" type="submit">Review shield</button>}
         {stage === 'quoting' && <p className="shield-progress" role="status">Getting a live quote…</p>}
       </form>
@@ -168,11 +168,11 @@ export function ShieldPanel({ onQuote, onSubmit, onConfirm }: ShieldPanelProps) 
           <div className="shield-total"><dt>ETH needed, including maximum fee</dt><dd>{formatEther(requiredWei)} ETH</dd></div>
           <div><dt>Available in public wallet</dt><dd>{formatEther(quote.publicBalanceWei)} ETH</dd></div>
         </dl>
-        <p>Fee and private balance are estimates. Your wallet will ask you to approve the public transaction.</p>
+        <p>Fee and private balance are estimates. Confirming signs on this device and broadcasts through the private route.</p>
         <p>Review valid until {new Date(quote.expiresAt).toLocaleTimeString()}.</p>
-        {stage === 'review' && <div className="shield-actions"><button type="button" onClick={() => { setQuote(null); setStage('draft') }}>Edit amount</button><button type="button" className="primary" onClick={() => void submit()}>Confirm in wallet</button></div>}
-        {stage === 'submitting' && <p className="shield-progress" role="status">Waiting for wallet approval…</p>}
-        {stage === 'pending' && <p className="shield-progress" role="status">Transaction submitted. Waiting for the Sepolia receipt…</p>}
+        {stage === 'review' && <div className="shield-actions"><button type="button" onClick={() => { setQuote(null); setStage('draft') }}>Edit amount</button><button type="button" className="primary" onClick={() => void submit()}>Sign and shield</button></div>}
+        {stage === 'submitting' && <p className="shield-progress" role="status">Signing on this device and sending through the private route…</p>}
+        {stage === 'pending' && <p className="shield-progress" role="status">Checking the signed transaction for Sepolia confirmation…</p>}
         {transactionHash && <a className="shield-explorer" href={`https://sepolia.etherscan.io/tx/${transactionHash}`} target="_blank" rel="noopener noreferrer">View submitted transaction ↗</a>}
         {journalWarning && <p role="alert">This browser could not save the transaction. Keep its hash before closing this page.</p>}
       </div>}

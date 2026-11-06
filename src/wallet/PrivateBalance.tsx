@@ -2,16 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { formatEther } from 'ethers'
 import { RailgunWalletBalanceBucket } from '@railgun-community/shared-models'
 import { observePrivateWethBalance, refreshPrivateWethBalance } from '../railgun/balance'
+import { formatDisplayBalance } from '../domain/format-display'
 
 export type PrivateBalanceProps = {
   walletId: string
   routeReady: boolean
   routeError?: string
   refreshKey?: number
+  onSpendable?: (walletId: string, amount: bigint) => void
 }
 
 const buckets = [
-  [RailgunWalletBalanceBucket.Spendable, 'Spendable'],
   [RailgunWalletBalanceBucket.ShieldPending, 'Shield pending'],
   [RailgunWalletBalanceBucket.ShieldBlocked, 'Shield blocked'],
   [RailgunWalletBalanceBucket.ProofSubmitted, 'Proof submitted'],
@@ -25,13 +26,15 @@ export function PrivateBalance(props: PrivateBalanceProps) {
   return <PrivateBalanceForWallet key={`${props.walletId}:${props.routeReady}:${props.refreshKey ?? 0}`} {...props} />
 }
 
-function PrivateBalanceForWallet({ walletId, routeReady, routeError }: PrivateBalanceProps) {
+function PrivateBalanceForWallet({ walletId, routeReady, routeError, onSpendable }: PrivateBalanceProps) {
   const [amounts, setAmounts] = useState<BucketAmounts>({})
   const [lastUpdate, setLastUpdate] = useState<number | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [subscribed, setSubscribed] = useState(false)
   const [error, setError] = useState('')
   const generation = useRef(0)
+  const spendableCallback = useRef(onSpendable)
+  useEffect(() => { spendableCallback.current = onSpendable }, [onSpendable])
 
   async function refresh(id: string, version: number) {
     if (generation.current !== version) return
@@ -54,7 +57,12 @@ function PrivateBalanceForWallet({ walletId, routeReady, routeError }: PrivateBa
     void observePrivateWethBalance(walletId, (update) => {
       if (generation.current !== version || update.walletId !== walletId) return
       setAmounts((current) => ({ ...current, [update.bucket]: update.amountWei }))
-      setLastUpdate(update.receivedAt)
+      if (update.bucket === RailgunWalletBalanceBucket.Spendable) {
+        setError('')
+        setLastUpdate(update.receivedAt)
+        setRefreshing(false)
+        spendableCallback.current?.(walletId, update.amountWei)
+      }
     }).then((stop) => {
       if (generation.current !== version) { stop(); return }
       unsubscribe = stop
@@ -68,18 +76,20 @@ function PrivateBalanceForWallet({ walletId, routeReady, routeError }: PrivateBa
 
   const routeProblem = !routeReady ? routeError || 'Private route is unavailable. Balance reads have stopped.' : ''
   const status = routeProblem ? routeProblem : error ? error : refreshing ? 'Syncing private balance…' :
-    lastUpdate ? `Updated at ${new Date(lastUpdate).toLocaleTimeString()}` :
+    lastUpdate ? `Balance received at ${new Date(lastUpdate).toLocaleTimeString()}` :
       subscribed ? 'Syncing your private balance. The first scan may take a few minutes.' : 'Preparing balance…'
+  const spendableAmount = amounts[RailgunWalletBalanceBucket.Spendable]
 
   return <section className="private-balance" aria-labelledby="private-balance-heading">
-    <div className="private-balance-heading"><div><p className="eyebrow">PRIVATE BALANCE</p><h2 id="private-balance-heading">WETH on Sepolia</h2></div>
+    <div className="private-balance-heading"><div><p className="eyebrow">PRIVATE BALANCE</p><h2 id="private-balance-heading">Available to send</h2></div>
       {routeReady && subscribed && !refreshing && <button type="button" onClick={() => void refresh(walletId, generation.current)}>Refresh balance</button>}
     </div>
+    <div className="private-balance-total"><strong title={!routeProblem && spendableAmount !== undefined ? `${formatEther(spendableAmount)} WETH` : undefined}>{routeProblem ? '—' : spendableAmount === undefined ? 'Awaiting balance' : formatDisplayBalance(spendableAmount)}</strong>{!routeProblem && spendableAmount !== undefined && <span>WETH</span>}</div>
     <p className="private-balance-status" role={routeProblem || error ? 'alert' : 'status'}>{status}</p>
-    <div className="private-balance-grid">
+    <details className="private-balance-details"><summary>Balance details</summary>{!routeProblem && spendableAmount !== undefined && <p className="exact-private-balance">Exact spendable balance: <code>{formatEther(spendableAmount)} WETH</code></p>}<div className="private-balance-grid">
       {buckets.map(([bucket, label]) => <div key={bucket}>
         <span>{label}</span><strong>{routeProblem ? '—' : amounts[bucket] === undefined ? 'Syncing' : `${formatEther(amounts[bucket])} WETH`}</strong>
       </div>)}
-    </div>
+    </div></details>
   </section>
 }
