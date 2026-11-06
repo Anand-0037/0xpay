@@ -1,4 +1,4 @@
-import Level from 'level-js'
+import { createBrowserDatabase, protectNamespaceReads } from './browser-database'
 import { Buffer } from 'buffer'
 import type { SnarkJSGroth16 } from '@railgun-community/wallet'
 import { APP_RPC_URL, type PrivateRpc } from '../rpc'
@@ -22,7 +22,7 @@ async function initialize(route: PrivateRpc) {
   bindEthersToPrivateRoute(route)
   await checkSepoliaPoi()
   ;(globalThis as typeof globalThis & { Buffer?: typeof Buffer }).Buffer = Buffer
-  const [{ startRailgunEngine, loadProvider, unloadProvider, stopRailgunEngine, getProver }, { NetworkName }, { groth16 }] = await Promise.all([
+  const [{ startRailgunEngine, loadProvider, unloadProvider, stopRailgunEngine, getProver, getEngine }, { NetworkName }, { groth16 }] = await Promise.all([
     import('@railgun-community/wallet'),
     import('@railgun-community/shared-models'),
     import('snarkjs'),
@@ -30,9 +30,10 @@ async function initialize(route: PrivateRpc) {
   const artifactStore = await createBrowserArtifactStore()
   try {
     await startRailgunEngine(
-      '0xpay', new Level('0xpay-railgun-engine'), false, artifactStore,
+      '0xpay', createBrowserDatabase('0xpay-railgun-engine'), false, artifactStore,
       false, false, [POI_NODE_URL],
     )
+    protectNamespaceReads(getEngine().db)
     // The SDK's older declaration does not match snarkjs's optional-input declaration.
     getProver().setSnarkJSGroth16(groth16 as unknown as SnarkJSGroth16)
     const { feesSerialized } = await loadProvider({
