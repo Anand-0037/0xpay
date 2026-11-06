@@ -26,6 +26,8 @@ Browser: encrypted note + local proof
 
 A hosted browser run on [0xpay.fun](https://0xpay.fun/) completed a 0.1 devnet ETH deposit, encrypted note backup, fresh-profile restore and private send through Nox. [The claim](https://explorer.altmempool.wtf/tx/0x0aace393ed7d593fc01707901cfe2f09cbce59befead4db802816b7bd3251d72?node=https%3A%2F%2Faltmempool.forshtat.com%2Frpc) was included in block 6078; a previously empty recipient received **0.09614 devnet ETH** after a **0.00386 ETH** claim fee. The canonical mempool rejected the validation prefix; the normal alternative mempool admitted it. After reload, the restored wallet showed **0 unspent notes**. [Transaction evidence and limits](protocol/EVIDENCE.md).
 
+[Hosted payment screen](media/hosted-payment-2026-11-06.png) — the actual browser review, canonical rejection, alternative admission, inclusion and recipient balance. The screenshot supports the walkthrough; the transaction receipt above is the onchain evidence.
+
 Nox connection can time out; one fresh reload needed a second attempt. This run does not prove every browser or worker can complete the flow. The devnet can reset and erase explorer history. A receipt shows inclusion, not chain finality.
 
 ## Run and inspect
