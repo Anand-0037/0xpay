@@ -31,11 +31,11 @@
 .brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; font-size: 23px; font-weight: 760; letter-spacing: -.055em; white-space: nowrap; }
 .brand img { display: block; width: 46px; height: 46px; border-radius: 9px; object-fit: cover; }
 .app-navigation { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; }
-.app-navigation a { padding: 8px 12px; border-radius: 999px; color: var(--muted); text-decoration: none; font-size: 12px; }
+.app-navigation a { padding: 8px 12px; border-radius: 999px; color: var(--muted); text-decoration: none; font-size: 14px; }
 .app-navigation a[aria-current="page"] { background: var(--raised); color: var(--ink); font-weight: 650; }
 .app-navigation a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.network-context { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
-.wallet-status { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.network-context { margin-left: auto; color: var(--muted); font-size: 14px; white-space: nowrap; }
+.wallet-status { color: var(--muted); font-size: 14px; white-space: nowrap; }
 .route-chip {
   display: inline-flex;
   align-items: center;
@@ -48,7 +48,7 @@
   border-radius: 999px;
   background: #fffaf3;
   color: var(--ink);
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 650;
   cursor: pointer;
   white-space: nowrap;
@@ -86,7 +86,7 @@
   border-radius: 10px;
   background: var(--raised);
   color: var(--ink);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 650;
   cursor: pointer;
   transition: border-color .16s ease, background-color .16s ease, transform .16s ease;
@@ -99,7 +99,7 @@
 .wallet-tabs { display: flex; flex-wrap: wrap; gap: 9px; margin: 31px 0 24px; }
 .wallet-tabs button[aria-pressed="true"] { border-color: var(--accent); background: #f7e8dc; color: #8b391c; }
 .wallet-form { display: grid; gap: 20px; width: min(100%, 550px); margin-top: 24px; }
-.wallet-form label, .backup-check label { display: grid; gap: 9px; color: #423b35; font-size: 12px; font-weight: 650; }
+.wallet-form label, .backup-check label { display: grid; gap: 9px; color: #423b35; font-size: 14px; font-weight: 650; }
 .wallet-form input, .wallet-form textarea, .backup-check input {
   width: 100%;
   min-height: 48px;
@@ -145,15 +145,15 @@
 .wallet-setup-card { min-width: 0; padding: clamp(26px, 3vw, 38px); border: 1px solid #ddd4c9; border-radius: 22px; background: var(--panel); box-shadow: 0 22px 60px rgb(88 64 34 / 7%); }
 .wallet-setup-card .eyebrow { margin-bottom: 12px; }
 .wallet-panel .wallet-setup-card h2 { font-size: clamp(27px, 3vw, 34px); letter-spacing: -.04em; }
-.wallet-setup-copy { margin: 17px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.wallet-setup-copy { margin: 17px 0 0; color: var(--muted); font-size: 16px; line-height: 1.7; }
 .wallet-setup-card .wallet-tabs { flex-wrap: nowrap; gap: 4px; margin: 27px 0 0; padding: 4px; border: 1px solid #ddd4c9; border-radius: 12px; background: #f4f0e9; }
-.wallet-setup-card .wallet-tabs button { flex: 1; min-width: 0; min-height: 39px; padding: 8px; border-color: transparent; background: transparent; font-size: 12px; }
+.wallet-setup-card .wallet-tabs button { flex: 1; min-width: 0; min-height: 44px; padding: 8px; border-color: transparent; background: transparent; font-size: 14px; }
 .wallet-setup-card .wallet-tabs button[aria-pressed="true"] { border-color: #be9e82; background: #f7e8dc; color: #763b1e; }
 .wallet-setup-card .wallet-form { margin-top: 25px; gap: 22px; }
 .wallet-setup-card .wallet-form > button { width: 100%; min-height: 48px; margin-top: 0; }
-.wallet-setup-connection { display: block; margin-top: 19px; color: #675a4f; font-size: 12px; line-height: 1.6; }
+.wallet-setup-connection { display: block; margin-top: 19px; color: #675a4f; font-size: 14px; line-height: 1.6; }
 .wallet-setup-footnote { margin: 22px 0 0; padding-top: 19px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; text-align: center; }
-.wallet-setup-card > .wallet-error { margin: 18px 0 0; font-size: 12px; line-height: 1.65; }
+.wallet-setup-card > .wallet-error { margin: 18px 0 0; font-size: 14px; line-height: 1.65; }
 .wallet-content > p { max-width: 650px; margin: 20px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
 .wallet-active .wallet-panel-heading > div > h2 { font-size: 34px; letter-spacing: -.045em; }
 .wallet-overview { margin-top: 27px; }
@@ -323,11 +323,24 @@
 
 .connection-overlay { position: fixed; inset: 0; z-index: 20; display: flex; justify-content: flex-end; }
 .connection-scrim { position: absolute; inset: 0; border: 0; background: rgb(53 44 32 / 24%); cursor: pointer; }
-.connection-drawer { position: relative; width: min(100%, 510px); height: 100%; overflow-y: auto; padding: 31px; border-left: 1px solid #ded3c6; background: #fffdf8; box-shadow: -18px 0 50px rgb(88 64 34 / 12%); }
+.connection-drawer { position: relative; width: min(100%, 510px); height: 100%; overflow-y: auto; padding: 31px; border-left: 1px solid #d1c1ae; background: #fffdf8; box-shadow: -18px 0 50px rgb(88 64 34 / 12%); font-size: 16px; line-height: 1.7; }
 .connection-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .connection-top h2 { margin: 0; font-size: 27px; line-height: 1.15; letter-spacing: -.04em; }
 .connection-top button { width: 39px; height: 39px; flex: none; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); color: var(--ink); font-size: 25px; line-height: 1; cursor: pointer; }
-.connection-state { display: flex; align-items: center; gap: 10px; margin: 34px 0 24px; font-size: 14px; }
+.connection-state { display: flex; align-items: center; gap: 10px; margin: 30px 0 14px; font-size: 16px; }
+.connection-provider { color: var(--muted); font-size: 14px; }
+.connection-network { margin-top: 24px; padding: 20px 0; border-block: 1px solid var(--line); }
+.connection-network label { display: block; margin-bottom: 9px; font-size: 14px; font-weight: 650; }
+.connection-network select { width: 100%; min-height: 46px; padding: 9px 12px; border: 1px solid #c5b5a2; border-radius: 9px; color: var(--ink); background: var(--panel); font: inherit; }
+.connection-network p { margin: 10px 0 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.connection-progress { display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.connection-spinner { width: 16px; height: 16px; flex: none; border: 2px solid #e2cdb9; border-top-color: var(--accent); border-radius: 50%; animation: connection-turn .9s linear infinite; }
+@keyframes connection-turn { to { transform: rotate(360deg); } }
+.connection-privacy { margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line); }
+.connection-privacy summary { cursor: pointer; font-size: 15px; font-weight: 650; }
+.connection-privacy p { color: var(--muted); font-size: 14px; line-height: 1.7; }
+.connection-disconnect { margin-top: 12px; }
+.connection-drawer :is(button, select, summary):focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .connection-drawer button:not(.connection-top button) { min-height: 38px; padding: 7px 12px; border: 1px solid #c5ab92; border-radius: 9px; background: #fff1de; color: #7d431e; cursor: pointer; }
 .connection-list { margin: 0; }
 .connection-list > div { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 12px; padding: 16px 0; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.6; }
@@ -388,11 +401,11 @@
   .app-header { flex-wrap: wrap; column-gap: 12px; row-gap: 7px; padding: 13px 20px; }
   .brand { margin-right: auto; font-size: 20px; }
   .brand img { width: 40px; height: 40px; }
-  .network-context { margin-left: 0; font-size: 11px; }
+  .network-context { margin-left: 0; font-size: 13px; }
   .wallet-status { display: none; }
   .route-chip { order: 3; flex: 0 0 100%; max-width: none; }
   .app-navigation { order: 2; }
-  .app-navigation a { padding: 7px 9px; font-size: 11px; }
+  .app-navigation a { padding: 7px 9px; font-size: 14px; }
   .wallet-main { padding: 26px 16px 70px; }
   .wallet-panel { padding: 26px 20px; border-radius: 17px; }
   .wallet-panel h2 { font-size: 31px; }

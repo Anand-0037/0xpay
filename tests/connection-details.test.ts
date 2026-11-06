@@ -12,8 +12,6 @@ const stats = { attempted: 4, completed: 3, failed: 1, bootstrapReads: 2,
     eth_sendRawTransaction: { attempted: 1, completed: 0, failed: 1 } } }
 const base: Omit<ComponentProps<typeof ConnectionDetails>, 'open' | 'onClose'> = {
   route: { status: 'ready', stats }, engine: { status: 'ready', shieldFeeBasisPoints: 25n },
-  traffic: { counts: { poi: 1, artifacts: 0, indexer: 0, bootstrap: 2, 'app-static': 0, 'worker-bundle': 1, 'market-api': 0, blocked: 0 },
-    recent: [{ kind: 'poi', host: 'private-diagnostic.example', outcome: 'sent' }] },
   onReconnect() {}, onDisconnect() {},
 }
 
@@ -35,7 +33,7 @@ function environment() {
   } }
 }
 
-test('connection drawer keeps diagnostics collapsed and traps/restores keyboard focus', async () => {
+test('connection drawer keeps coverage concise and traps/restores keyboard focus', async () => {
   const { dom, root, cleanup } = environment()
   function Harness() {
     const [open, setOpen] = useState(false)
@@ -55,13 +53,13 @@ test('connection drawer keeps diagnostics collapsed and traps/restores keyboard 
     const summary = technical.querySelector<HTMLElement>('summary')!
     assert.equal(technical.open, false)
     assert.equal(document.body.style.overflow, 'hidden')
-    assert.equal(summary.textContent, 'Technical details')
+    assert.equal(summary.textContent, 'Privacy coverage')
     assert.match(dialog.querySelector('#connection-explanation')!.textContent!, /If the connection fails, requests stop/)
     assert.match(dialog.textContent!, /Connected through Nym/)
-    assert.match(technical.textContent!, /Nym via Anon-RPC/)
+    assert.match(dialog.textContent!, /Nym via Anon-RPC/)
     assert.equal(dialog.querySelector('select'), null, 'network selection remains optional for legacy callers')
-    assert.match(technical.textContent!, /private-diagnostic.example/)
-    assert.match(technical.textContent!, /does not establish RPC success or transaction settlement/)
+    assert.doesNotMatch(dialog.textContent!, /RPC methods observed|Recent page destinations|Signed broadcasts|3\/4|2 direct specifier reads/)
+    assert.match(technical.textContent!, /gas-paying address remains public/)
     assert.equal(document.activeElement, close)
 
     const key = (value: string, shiftKey = false) => document.activeElement!.dispatchEvent(
@@ -71,9 +69,8 @@ test('connection drawer keeps diagnostics collapsed and traps/restores keyboard 
     key('Tab')
     assert.equal(document.activeElement, close)
     technical.open = true
-    const disconnect = [...dialog.querySelectorAll<HTMLButtonElement>('button')].at(-1)!
     close.focus(); key('Tab', true)
-    assert.equal(document.activeElement, disconnect)
+    assert.equal(document.activeElement, summary)
     key('Tab')
     assert.equal(document.activeElement, close)
     document.getElementById('outside')!.focus()
@@ -82,6 +79,21 @@ test('connection drawer keeps diagnostics collapsed and traps/restores keyboard 
     assert.equal(document.querySelector('[role="dialog"]'), null)
     assert.equal(document.body.style.overflow, '')
     assert.equal(document.activeElement, opener)
+  } finally { await cleanup() }
+})
+
+test('agent coverage retains simulation and separate inference boundaries without request logs', async () => {
+  const { dom, root, cleanup } = environment()
+  try {
+    flushSync(() => root.render(createElement(ConnectionDetails, { ...base, open: true, context: 'agents',
+      privacyNetwork: 'nox', onClose() {} })))
+    const dialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"]')!
+    assert.match(dialog.textContent!, /Nox via Anon-RPC · Polygon/)
+    assert.match(dialog.textContent!, /Orders here are simulated and do not move funds/)
+    assert.match(dialog.textContent!, /app server and 0G separately/)
+    assert.match(dialog.textContent!, /policy signing uses your browser wallet/)
+    assert.doesNotMatch(dialog.textContent!, /bootstrapReads|eth_getBalance|RPC requests|Recent page destinations/)
+    assert.ok([...dialog.querySelectorAll('button')].some(button => button.textContent === 'Disconnect private route'))
   } finally { await cleanup() }
 })
 
@@ -98,7 +110,7 @@ test('connection failure exposes the actual reason and reconnect without opening
     assert.equal(dialog.querySelector('[role="alert"]')?.closest('details'), null)
     const technical = dialog.querySelector<HTMLDetailsElement>('details')!
     assert.equal(technical.open, false)
-    assert.match(technical.textContent!, /raw worker timeout diagnostic/)
+    assert.doesNotMatch(technical.textContent!, /raw worker timeout diagnostic/)
     const reconnect = [...dialog.querySelectorAll('button')].find((button) => button.textContent === 'Reconnect')!
     flushSync(() => reconnect.click())
     assert.equal(retries, 1)
@@ -114,11 +126,12 @@ test('connection progress reports elapsed time and observed stage without fabric
         route: { status: 'connecting', stats, stage, elapsedMs } })))
     render('starting-worker', 12_450)
     const dialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"]')!
-    assert.match(dialog.textContent!, /Starting Nox worker · 12s elapsed/)
-    assert.doesNotMatch(dialog.textContent!, /% complete|Almost ready|Validating chain/)
+    assert.match(dialog.textContent!, /Connecting through Nox · 12s/)
+    assert.ok(dialog.querySelector('.connection-spinner[aria-hidden="true"]'))
+    assert.doesNotMatch(dialog.textContent!, /% complete|Almost ready|Checking the network/)
     render('validating-chain', 31_050)
-    assert.match(dialog.textContent!, /Validating chain through Nox · 31s elapsed/)
-    assert.doesNotMatch(dialog.textContent!, /Starting Nox worker/)
+    assert.match(dialog.textContent!, /Checking the network · 31s/)
+    assert.doesNotMatch(dialog.textContent!, /Connecting through Nox ·/)
     flushSync(() => root.render(createElement(ConnectionDetails, { ...base, open: true, onClose() {},
       route: { status: 'failed', stats, elapsedMs: 60_800, message: 'Private RPC read timed out' } })))
     assert.match(dialog.textContent!, /Connection attempt stopped after 60s/)
@@ -214,6 +227,6 @@ test('Nox connection labels reflect the selected network and controlled selector
     assert.equal(select.value, 'nox', 'parent controls network selection until connection is reloaded')
     flushSync(() => root.render(createElement(ConnectionDetails, { ...props, route: { ...base.route, status: 'connecting' } })))
     assert.match(dialog.querySelector('[role="status"]')!.textContent!, /Connecting through Nox/)
-    assert.match(dialog.textContent!, /A successful response alone is not proof of anonymity/)
+    assert.match(dialog.textContent!, /does not hide public onchain activity/)
   } finally { await cleanup() }
 })

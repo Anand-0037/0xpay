@@ -8,10 +8,9 @@ import type { WalletSession } from './wallet/lifecycle'
 import { ConnectionDetails, ConnectionProgress } from './ui/ConnectionDetails'
 import { PaymentUseCases } from './ui/PaymentUseCases'
 import { AgentWorkspace } from './agents/AgentWorkspace'
-import { trafficSnapshot } from './net/network-guard'
 import brandLogo from './assets/0xpay-logo.png'
-import { BUILD_ID } from './build-info'
 import './App.css'
+import './wallet/RecoveryPhraseInput.css'
 import './agents/AgentWorkspace.css'
 
 type RouteState =
@@ -169,7 +168,7 @@ function App() {
       {wallet && <span className="wallet-status">Wallet unlocked</span>}
     </header>
 
-    <ConnectionDetails open={connectionOpen} route={route} engine={engine} traffic={trafficSnapshot()} onClose={() => setConnectionOpen(false)} onReconnect={retryRoute} onDisconnect={disconnectRoute} context={view} privacyNetwork={privacyNetwork} onNetworkChange={changeNetwork} />
+    <ConnectionDetails open={connectionOpen} route={route} engine={engine} onClose={() => setConnectionOpen(false)} onReconnect={retryRoute} onDisconnect={disconnectRoute} context={view} privacyNetwork={privacyNetwork} onNetworkChange={changeNetwork} />
 
     <main className="wallet-main">
       {view === 'agents' ? <AgentWorkspace route={rpcClient} routeGeneration={readyGeneration} onReconnect={retryRoute} /> : <Suspense fallback={<p role="status">Opening your wallet…</p>}>
@@ -178,7 +177,7 @@ function App() {
         {!wallet && <PaymentUseCases />}
       </Suspense>}
     </main>
-    <footer className="app-footer"><span>0xPay <small title="Source commit and public-source fingerprint; +local includes uncommitted source changes.">Build {BUILD_ID}</small></span><nav aria-label="Footer"><a href="https://github.com/Anand-0037/0xpay" target="_blank" rel="noopener noreferrer">Source</a><a href="https://github.com/Anand-0037" target="_blank" rel="noopener noreferrer" aria-label="Anand on GitHub">GitHub</a><a href="https://x.com/AnandVashisht15" target="_blank" rel="noopener noreferrer" aria-label="Anand on X">X</a></nav></footer>
+    <footer className="app-footer"><span>0xPay</span><nav aria-label="Footer"><a href="https://github.com/Anand-0037/0xpay" target="_blank" rel="noopener noreferrer">Source</a><a href="https://github.com/Anand-0037" target="_blank" rel="noopener noreferrer" aria-label="Anand on GitHub">GitHub</a><a href="https://x.com/AnandVashisht15" target="_blank" rel="noopener noreferrer" aria-label="Anand on X">X</a></nav></footer>
   </div>
 }
 

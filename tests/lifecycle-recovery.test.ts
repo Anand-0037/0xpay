@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import 'fake-indexeddb/auto'
 import Level from 'level-js'
-import { IDBObjectStore } from 'fake-indexeddb'
+import { IDBDatabase, IDBObjectStore } from 'fake-indexeddb'
+import { Mnemonic } from 'ethers'
 import { RailgunEngine, TXIDVersion } from '@railgun-community/engine'
 import { ArtifactStore, startRailgunEngine, stopRailgunEngine, getEngine } from '@railgun-community/wallet'
 import {
@@ -10,6 +11,7 @@ import {
   recoveryPhraseForBackup, storedVault, unlockedFundingWallet, unlockedSessionVersion,
   unlockedWalletId, unlockedEncryptionKey, unlockLocalWallet,
 } from '../src/wallet/lifecycle.ts'
+import { createBrowserDatabase, protectNamespaceReads } from '../src/railgun/browser-database.ts'
 
 test('actual RAILGUN wallet survives reload, SDK database loss and fresh phrase restore', { timeout: 120_000 }, async () => {
   const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
@@ -195,6 +197,71 @@ test('failed SDK history-marker writes never recreate the wallet or leave a part
   } finally {
     RailgunEngine.prototype.loadWallet = originalLoad
     IDBObjectStore.prototype.put = originalPut
+    await lockLocalWallet()
+    await stopRailgunEngine()
+    if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage)
+    else Reflect.deleteProperty(globalThis, 'localStorage')
+  }
+})
+
+test('actual SDK import uses the production adapter, recovers a closed handle and preserves retry after failed storage', { timeout: 180_000 }, async () => {
+  const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const originalTransaction = IDBDatabase.prototype.transaction
+  const originalPut = IDBObjectStore.prototype.put
+  const originalFetch = globalThis.fetch
+  const records = new Map<string, string>()
+  const observed: { handle?: IDBDatabase } = {}
+  let networkCalls = 0
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: (key: string) => records.get(key) ?? null,
+    setItem: (key: string, value: string) => { records.set(key, value) },
+    removeItem: (key: string) => { records.delete(key) },
+  } })
+  IDBDatabase.prototype.transaction = function (...args: Parameters<typeof originalTransaction>) {
+    observed.handle = this
+    return originalTransaction.apply(this, args)
+  }
+  globalThis.fetch = async () => { networkCalls++; throw new Error('No network in disposable wallet import test') }
+  const artifacts = new ArtifactStore(async () => null, async () => { throw new Error('No proof downloads in import test') }, async () => false)
+  const start = async (name: string) => {
+    await startRailgunEngine('0xpaytest', createBrowserDatabase(name), false, artifacts, false, false, [])
+    protectNamespaceReads(getEngine().db)
+  }
+  // Deterministic, synthetic, unfunded test phrase; never a user wallet.
+  const phrase = Mnemonic.fromEntropy(new Uint8Array(16).fill(17)).phrase
+  const identity = (session: { id: string; publicAddress: string; railgunAddress: string }) => [session.id, session.publicAddress, session.railgunAddress]
+  try {
+    await start('0xpay-import-production-adapter')
+    await getEngine().db.put(['adapter-probe'], 'aa')
+    observed.handle!.close()
+    const imported = await importLocalWallet(phrase.replaceAll(' ', '\n  '), 'disposable-import-password')
+    const expected = identity(imported)
+    assert.equal(imported.backupConfirmed, true)
+    assert.equal(storedVault()?.walletId, imported.id)
+    assert.equal(records.get('0xpay.vault.v1')!.includes(phrase), false)
+    await lockLocalWallet()
+    await stopRailgunEngine()
+    await start('0xpay-import-production-adapter')
+    assert.deepEqual(identity(await unlockLocalWallet('disposable-import-password')), expected)
+    await lockLocalWallet()
+    await stopRailgunEngine()
+
+    // A second isolated profile has no vault and gets a real failed IDB write.
+    // Only this synthetic Map is cleared, never a browser's existing wallet.
+    records.clear()
+    await start('0xpay-import-rejected-storage')
+    IDBObjectStore.prototype.put = function () { throw new DOMException('Synthetic quota fault', 'QuotaExceededError') }
+    await assert.rejects(importLocalWallet(phrase, 'disposable-import-password'), /Wallet storage could not be written/)
+    assert.equal(storedVault(), null)
+    assert.deepEqual(Object.keys(getEngine().wallets), [])
+    assert.throws(unlockedFundingWallet, /locked/)
+    IDBObjectStore.prototype.put = originalPut
+    assert.deepEqual(identity(await importLocalWallet(phrase, 'disposable-import-password')), expected)
+    assert.equal(networkCalls, 0)
+  } finally {
+    IDBObjectStore.prototype.put = originalPut
+    IDBDatabase.prototype.transaction = originalTransaction
+    globalThis.fetch = originalFetch
     await lockLocalWallet()
     await stopRailgunEngine()
     if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage)

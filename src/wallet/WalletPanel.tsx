@@ -6,6 +6,7 @@ import { ShieldPanel } from './ShieldPanel'
 import { SendPanel } from './SendPanel'
 import { PrivateBalance } from './PrivateBalance'
 import { ActivityPanel } from './ActivityPanel'
+import { RecoveryPhraseInput } from './RecoveryPhraseInput'
 import { WalletIntro } from '../ui/WalletIntro'
 import {
   createLocalWallet, hasStoredVault, importLocalWallet, lockLocalWallet, unlockLocalWallet,
@@ -166,6 +167,8 @@ export function WalletPanel({ routeVersion = 0, blockNumber, engineReady, shield
       setShowRecovery(false)
       setAnswers(['', '', ''])
       setMode('unlock')
+      setPhrase('')
+      setPassword('')
       setShowPassword(false)
       setBusy(false)
     }
@@ -201,7 +204,7 @@ export function WalletPanel({ routeVersion = 0, blockNumber, engineReady, shield
 
   function chooseSetup(next: 'create' | 'import') {
     if (busy || mode === next) return
-    setMode(next); setPassword(''); setShowPassword(false); setPhrase(''); setError('')
+    setMode(next); setPassword(''); setShowPassword(false); setError('')
   }
 
   function setupNavigation(event: React.KeyboardEvent<HTMLDivElement>) {
@@ -289,12 +292,11 @@ export function WalletPanel({ routeVersion = 0, blockNumber, engineReady, shield
       <p className="wallet-setup-copy">{mode === 'unlock' ? 'Unlock the wallet saved in this browser.' : mode === 'import' ? 'Restore with your recovery words and set a password for this device.' : 'Choose a password to encrypt your wallet on this device.'}</p>
       {!hasStoredVault() && <div className="wallet-tabs" role="radiogroup" aria-label="Wallet setup" onKeyDown={setupNavigation}>{(['create', 'import'] as const).map(option => <button key={option} type="button" role="radio" data-setup-mode={option} aria-checked={mode === option} tabIndex={mode === option ? 0 : -1} aria-controls="wallet-setup-form" disabled={busy} onClick={() => chooseSetup(option)} style={{ fontSize: 14, ...(mode === option ? { borderColor: '#be9e82', background: '#f7e8dc', color: '#763b1e' } : {}) }}>{option === 'create' ? 'Create wallet' : 'Import wallet'}</button>)}</div>}
       <form id="wallet-setup-form" onSubmit={submit} className="wallet-form">
-        {mode === 'import' && <div><label htmlFor="wallet-import-phrase" style={{ fontSize: 14 }}>Recovery phrase<textarea id="wallet-import-phrase" value={phrase} disabled={busy} onChange={(event) => setPhrase(event.target.value)} autoComplete="off" spellCheck={false} autoCapitalize="none" required placeholder="Enter your 12 or 24 words" aria-describedby="wallet-import-visibility" /></label><p id="wallet-import-visibility" className="wallet-setup-footnote" style={{ fontSize: 13, lineHeight: 1.6 }}>Recovery words are visible in this field. Stop screen sharing before entering them.</p></div>}
+        {mode === 'import' && <RecoveryPhraseInput value={phrase} onChange={setPhrase} disabled={busy} />}
         <div><label htmlFor="wallet-local-password" style={{ fontSize: 14 }}>Password</label><div style={{ display: 'flex', gap: 8, alignItems: 'stretch', marginTop: 9 }}><input id="wallet-local-password" type={showPassword ? 'text' : 'password'} value={password} disabled={busy} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'unlock' ? 'current-password' : 'new-password'} minLength={12} required aria-describedby="wallet-password-requirements" style={{ minWidth: 0, flex: 1 }} /><button type="button" disabled={busy} aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword} aria-controls="wallet-local-password" onClick={() => setShowPassword(value => !value)}>{showPassword ? 'Hide' : 'Show'}</button></div><p id="wallet-password-requirements" className="wallet-setup-footnote" style={{ fontSize: 13, lineHeight: 1.6 }}>Use at least 12 characters. This password unlocks the encrypted wallet on this device.</p></div>
         <button className="primary" type="submit" disabled={!engineReady || !routeReady || busy}>{busy ? 'Opening wallet…' : mode === 'create' ? 'Create wallet' : mode === 'import' ? 'Restore wallet' : 'Unlock wallet'}</button>
       </form>
       {connectionNotice}
-      <p className="wallet-setup-footnote">Ethereum Sepolia · Test ETH only</p>
     </>}
     {error && <p className="wallet-error" role="alert">{error}</p>}
     </div>

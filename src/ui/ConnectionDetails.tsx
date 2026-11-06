@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { RouteStats } from '../rpc'
 import { PRIVACY_NETWORKS, type PrivacyNetwork } from '../rpc/networks'
-import type { TrafficEntry, TrafficKind } from '../net/network-guard'
 
 type Route = { status: 'connecting' | 'ready' | 'failed'; stats: RouteStats; message?: string; blockNumber?: number
   stage?: 'starting-worker' | 'validating-chain'; elapsedMs?: number; disconnectedByUser?: boolean }
@@ -12,11 +11,11 @@ export function ConnectionProgress({ stage = 'starting-worker', elapsedMs = 0, n
   stage?: Route['stage']; elapsedMs?: number; networkLabel: string
 }) {
   const seconds = Math.max(0, Math.floor(elapsedMs / 1000))
-  return <span>{stage === 'validating-chain' ? `Validating chain through ${networkLabel}` : `Starting ${networkLabel} worker`} · {seconds}s elapsed</span>
+  return <span className="connection-progress"><span className="connection-spinner" aria-hidden="true" /><span>{stage === 'validating-chain' ? 'Checking the network' : `Connecting through ${networkLabel}`} · {seconds}s</span></span>
 }
 
-export function ConnectionDetails({ open, route, engine, traffic, onClose, onReconnect, onDisconnect, context = 'payments', privacyNetwork = 'nym', onNetworkChange }: {
-  open: boolean; route: Route; engine: Engine; traffic: { counts: Record<TrafficKind, number>; recent: TrafficEntry[] }; onClose: () => void; onReconnect: () => void; onDisconnect: () => void; context?: 'lending' | 'payments' | 'agents'
+export function ConnectionDetails({ open, route, engine, onClose, onReconnect, onDisconnect, context = 'payments', privacyNetwork = 'nym', onNetworkChange }: {
+  open: boolean; route: Route; engine: Engine; onClose: () => void; onReconnect: () => void; onDisconnect: () => void; context?: 'lending' | 'payments' | 'agents'
   privacyNetwork?: PrivacyNetwork; onNetworkChange?: (network: PrivacyNetwork) => void
 }) {
   const closeButton = useRef<HTMLButtonElement>(null)
@@ -69,54 +68,33 @@ export function ConnectionDetails({ open, route, engine, traffic, onClose, onRec
   }, [open])
   if (!open) return null
   const networkLabel = PRIVACY_NETWORKS[privacyNetwork].label
-  const methods = Object.entries(route.stats.methodCounts ?? {})
-  const readCalls = methods.filter(([method]) => method !== 'eth_sendRawTransaction' && method !== 'other')
-    .reduce((total, [, count]) => ({ attempted: total.attempted + count.attempted,
-      completed: total.completed + count.completed, failed: total.failed + count.failed }),
-    { attempted: 0, completed: 0, failed: 0 })
-  const broadcasts = route.stats.methodCounts?.eth_sendRawTransaction ?? { attempted: 0, completed: 0, failed: 0 }
   return <div className="connection-overlay">
     <button className="connection-scrim" type="button" tabIndex={-1} aria-hidden="true" onClick={onClose} />
     <aside ref={drawer} id="connection-details" className="connection-drawer" role="dialog" aria-modal="true" aria-labelledby="connection-title" aria-describedby="connection-explanation">
       <div className="connection-top"><h2 id="connection-title">Connection</h2><button ref={closeButton} type="button" onClick={onClose} aria-label="Close connection details">×</button></div>
       <div className={`connection-state ${route.status}`} role="status"><span className="route-dot" aria-hidden="true" /><strong>{route.status === 'ready' ? `Connected through ${networkLabel}` : route.status === 'connecting' ? `Connecting through ${networkLabel}…` : route.disconnectedByUser ? 'Disconnected by you' : 'Connection failed'}</strong></div>
       {route.status === 'connecting' && <p><ConnectionProgress stage={route.stage} elapsedMs={route.elapsedMs} networkLabel={networkLabel} /></p>}
-      <p>{context === 'agents' ? 'Polygon · read-only' : 'Ethereum Sepolia'}</p>
+      <p className="connection-provider">{networkLabel} via Anon-RPC · {context === 'agents' ? 'Polygon' : 'Sepolia testnet'}</p>
       {onNetworkChange && <div className="connection-network">
         <label htmlFor="privacy-network">Privacy network</label>{' '}
         <select id="privacy-network" value={privacyNetwork} onChange={(event) => {
           const value = event.currentTarget.value
           if ((value === 'nox' || value === 'nym') && value !== privacyNetwork) onNetworkChange(value)
         }}><option value="nox">Nox</option><option value="nym">Nym</option></select>
-        <p>Switching reloads the private connection.</p>
+        <p>{context === 'payments' ? 'Changing networks restarts the connection and locks an open wallet.' : 'Changing networks restarts the connection. Read the position again before continuing.'}</p>
       </div>}
-      <p id="connection-explanation">{context === 'lending' ? `Position queries use ${networkLabel}. Requests reach the RPC through the selected network’s exit instead of a direct connection from this page. Your onchain position stays public.` : context === 'agents' ? `Account-state and public market requests use ${networkLabel}. Research uses the app server separately. Paper orders do not use or move wallet funds.` : `Your wallet’s blockchain requests use ${networkLabel}. If the connection fails, requests stop.`}</p>
+      <p id="connection-explanation">{context === 'lending' ? `Position queries use ${networkLabel}. Your onchain position stays public.` : context === 'agents' ? `Market data and account reads use ${networkLabel}. If the connection fails, those requests stop.` : `Your wallet’s blockchain requests use ${networkLabel}. If the connection fails, requests stop.`}</p>
       {context === 'payments' && route.status === 'ready' && (engine.status === 'waiting' || engine.status === 'starting') && <p role="status">Preparing your wallet…</p>}
       {(route.status === 'failed' || (context === 'payments' && engine.status === 'failed')) && <>
         <p role={route.disconnectedByUser ? 'status' : 'alert'}>{route.status === 'failed' ? route.message ?? 'The private connection stopped.' : engine.message ?? 'Wallet services could not connect.'}</p>
         {route.elapsedMs !== undefined && !route.disconnectedByUser && <p>Connection attempt stopped after {Math.max(0, Math.floor(route.elapsedMs / 1000))}s.</p>}
         <button type="button" onClick={onReconnect}>{context === 'payments' && engine.status === 'failed' && engine.reload ? 'Refresh app' : 'Reconnect'}</button>
       </>}
-      <details style={{ marginTop: 28 }}>
-      <summary>Technical details</summary>
-      {(route.message || engine.message) && <p className="connection-coverage">{engine.status === 'failed' ? engine.message : route.message}</p>}
-      <dl className="connection-list">
-        <div><dt>Network</dt><dd>{context === 'agents' ? 'Polygon · chain 137' : 'Ethereum Sepolia'}{route.blockNumber !== undefined ? ` · connection checked at block ${route.blockNumber.toLocaleString()}` : ''}</dd></div>
-        <div><dt>Worker</dt><dd>{networkLabel} via Anon-RPC</dd></div>
-        <div><dt>RPC requests</dt><dd>{route.stats.completed}/{route.stats.attempted} completed through worker · {route.stats.failed} failed</dd></div>
-        <div><dt>RPC read calls</dt><dd>{readCalls.completed}/{readCalls.attempted} transport replies · {readCalls.failed} failed</dd></div>
-        <div><dt>Signed broadcasts</dt><dd>{broadcasts.completed}/{broadcasts.attempted} transport replies · {broadcasts.failed} failed</dd></div>
-        {context === 'agents' && <div><dt>Public market HTTP</dt><dd>{route.stats.publicMarketCounts?.completed ?? 0}/{route.stats.publicMarketCounts?.attempted ?? 0} completed through worker · {route.stats.publicMarketCounts?.failed ?? 0} failed. Counted separately from RPC.</dd></div>}
-        <div><dt>Worker bootstrap</dt><dd>{route.stats.bootstrapReads} direct specifier reads</dd></div>
-        <div><dt>Other page requests</dt><dd>research API {traffic.counts['research-api'] ?? 0} to app server · POI {traffic.counts.poi ?? 0} direct · artifacts {traffic.counts.artifacts ?? 0} direct · indexer {traffic.counts.indexer ?? 0} direct · blocked {traffic.counts.blocked ?? 0}</dd></div>
-        {context === 'payments' && <div><dt>RAILGUN</dt><dd>{engine.status === 'ready' ? route.status === 'ready' ? `Connected · shield fee ${engine.shieldFeeBasisPoints?.toString()} basis points` : 'Paused until the private route reconnects' : engine.status === 'starting' ? 'Connecting' : engine.status === 'failed' ? `Error: ${engine.message}` : 'Waiting for private route'}</dd></div>}
-      </dl>
-      <details><summary>RPC methods observed</summary><ul>{methods.map(([method, count]) =>
-        <li key={method}><code>{method}</code>: {count.completed}/{count.attempted} transport replies · {count.failed} failed</li>
-      )}</ul><p>Calls inside a batch are counted separately. A transport reply does not establish RPC success or transaction settlement. No addresses or request contents are retained here.</p></details>
-      <p className="connection-coverage">{context === 'lending' ? 'Address-bearing position reads use the worker. Lending does not start RAILGUN, POI services or an address indexer. Initial page assets, the worker bundle and its onchain bootstrap lookup load outside that route. This panel observes page fetch/XHR, not worker internals, browser traffic or your entire device. A successful response alone is not proof of anonymity.' : context === 'agents' ? 'Supported Polygon RPC and allowlisted Gamma/CLOB requests use the worker. Configured research sends public evidence to the app server and 0G separately; account state stays local. No venue authentication or order submission occurs. Bootstrap and worker bundles load separately; these counters do not cover the whole browser or prove anonymity.' : 'The counters record requests observed through the worker; a broadcast is counted only when it is attempted. The worker lookup, privacy checks, proof downloads and indexer requests are direct. This panel counts page fetch and XHR, not traffic inside the worker, browser-native loads, or a connected wallet extension. A successful request alone does not prove anonymity.'}</p>
-      <div className="traffic-recent"><h3>Recent page destinations</h3><ul>{traffic.recent.map((entry, index) => <li key={`${index}-${entry.host}`}><span>{entry.kind}</span><code>{entry.host}</code><span>{entry.outcome}</span></li>)}</ul></div>
-      {route.status === 'ready' && (context !== 'payments' || engine.status === 'ready') && <button type="button" onClick={onDisconnect}>Disconnect private route</button>}
+      {route.status === 'ready' && <button className="connection-disconnect" type="button" onClick={onDisconnect}>Disconnect private route</button>}
+      <details className="connection-privacy">
+      <summary>Privacy coverage</summary>
+      <p>{context === 'agents' ? 'Public market data and supported Polygon reads use Anon-RPC. AI research receives public market evidence through the app server and 0G separately. Optional policy signing uses your browser wallet’s connection. Orders here are simulated and do not move funds.' : context === 'lending' ? 'Only position reads use Anon-RPC. This view does not start RAILGUN or its services.' : 'Blockchain requests from this wallet use Anon-RPC. Privacy checks, proof downloads and indexing use separate connections. The gas-paying address remains public.'}</p>
+      <p>Initial setup and app downloads use separate connections. Anon-RPC does not hide public onchain activity or protect every connection on your device.</p>
       </details>
     </aside>
   </div>
