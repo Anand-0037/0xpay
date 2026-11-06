@@ -4,6 +4,8 @@ import { setWorkerBundleResolvers } from './net/network-guard.ts'
 
 const BOOTSTRAP_RPC_URL = 'https://ethereum-rpc.publicnode.com'
 export const APP_RPC_URL = 'https://ethereum-sepolia-rpc.publicnode.com'
+// Published Nym specifier in the official Anon-RPC network catalogue:
+// https://ethereum.github.io/anon-rpc/adopters/
 const NYM_SPECIFIER = '0x3aCD9742C68F6d993066Ae25533e09b9e1f60eD0'
 const BOOTSTRAP_SELECTORS = new Set(['0x3898587d', '0x1c67ff29'])
 const WORKER_RESOLVERS_SELECTOR = '0x1c67ff29'
@@ -50,7 +52,13 @@ export class PrivateRpc {
     } } },
   }) as Worker) {
     this.workerFactory = workerFactory
-    this.worker = workerFactory((selector, result) => this.recordBootstrap(selector, result))
+    this.worker = this.makeWorker()
+  }
+  private makeWorker() {
+    const generation = this.generation
+    return this.workerFactory((selector, result) => {
+      if (generation === this.generation && this.statusValue !== 'closed') this.recordBootstrap(selector, result)
+    })
   }
   private recordBootstrap(selector: string, result: unknown) {
     this.bootstrapReads += 1
@@ -89,7 +97,7 @@ export class PrivateRpc {
     this.worker.close()
     this.resolverUrls.clear()
     setWorkerBundleResolvers([])
-    this.worker = this.workerFactory((selector, result) => this.recordBootstrap(selector, result))
+    this.worker = this.makeWorker()
     this.statusValue = 'connecting'
     return this.connect()
   }
@@ -144,6 +152,8 @@ export class PrivateRpc {
     if (this.statusValue === 'closed') return
     this.generation += 1
     this.statusValue = 'closed'
+    this.resolverUrls.clear()
+    setWorkerBundleResolvers([])
     this.worker.close()
   }
 }
