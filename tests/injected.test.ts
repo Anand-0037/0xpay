@@ -8,15 +8,22 @@ const account = '0x4C748dF523c602a3E58208414b55AA1C961Db3e9'
 
 function stub() {
   let chain = '0xaa36a7'
+  let allowSwitch = true
   let accounts = [account]
   const requests: string[] = []
   const provider: InjectedProvider = { async request({ method }) {
     requests.push(method)
     if (method === 'eth_chainId') return chain
+    if (method === 'wallet_switchEthereumChain') {
+      if (!allowSwitch) throw new Error('Rejected by wallet')
+      chain = '0xaa36a7'
+      return null
+    }
     if (method === 'eth_requestAccounts' || method === 'eth_accounts') return accounts
     throw new Error(`Unexpected wallet method: ${method}`)
   } }
-  return { provider, requests, setChain(value: string) { chain = value }, setAccounts(value: string[]) { accounts = value } }
+  return { provider, requests, setChain(value: string) { chain = value }, setAccounts(value: string[]) { accounts = value },
+    setAllowSwitch(value: boolean) { allowSwitch = value } }
 }
 
 test('explicit browser wallet connection checks Sepolia and exposes a checked signer', async () => {
@@ -36,7 +43,11 @@ test('wrong chain or changed account never yields a signer', async () => {
   const wallet = stub()
   try {
     wallet.setChain('0x1')
+    wallet.setAllowSwitch(false)
     await assert.rejects(connectInjectedWallet(wallet.provider), /Ethereum Sepolia/)
+    wallet.setAllowSwitch(true)
+    assert.deepEqual(await connectInjectedWallet(wallet.provider), { address: account, chainId: 11155111 })
+    assert.ok(wallet.requests.includes('wallet_switchEthereumChain'))
     wallet.setChain('0xaa36a7')
     await connectInjectedWallet(wallet.provider)
     wallet.setAccounts(['0xCE39a395F8b68993eBF95f6c5C63bE7a5688974e'])

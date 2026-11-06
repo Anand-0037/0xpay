@@ -21,11 +21,14 @@ function browserWallet(): InjectedProvider {
   return provider
 }
 
-async function assertSepolia(provider: InjectedProvider) {
+async function selectedChain(provider: InjectedProvider): Promise<bigint> {
   const chainId: unknown = await provider.request({ method: 'eth_chainId' })
-  if (typeof chainId !== 'string' || !/^0x[0-9a-f]+$/i.test(chainId) || BigInt(chainId) !== 11155111n) {
-    throw new Error('Switch your browser wallet to Ethereum Sepolia, then reconnect.')
-  }
+  if (typeof chainId !== 'string' || !/^0x[0-9a-f]+$/i.test(chainId)) throw new Error('Browser wallet returned an invalid network')
+  return BigInt(chainId)
+}
+
+async function assertSepolia(provider: InjectedProvider) {
+  if (await selectedChain(provider) !== 11155111n) throw new Error('Switch your browser wallet to Ethereum Sepolia, then reconnect.')
 }
 
 function checkedAddress(accounts: unknown): string {
@@ -40,7 +43,13 @@ export async function connectInjectedWallet(provider: InjectedProvider = browser
   const version = ++selectionVersion
   const accounts: unknown = await provider.request({ method: 'eth_requestAccounts' })
   const address = checkedAddress(accounts)
-  await assertSepolia(provider)
+  if (version !== selectionVersion) throw new Error('Browser wallet connection was cancelled. Connect again.')
+  if (await selectedChain(provider) !== 11155111n) {
+    if (version !== selectionVersion) throw new Error('Browser wallet connection was cancelled. Connect again.')
+    try { await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0xaa36a7' }] }) }
+    catch { throw new Error('Switch your browser wallet to Ethereum Sepolia, then connect again.') }
+    await assertSepolia(provider)
+  }
   if (version !== selectionVersion) throw new Error('Browser wallet connection was cancelled. Connect again.')
   connectedProvider = provider
   connectedAddress = address
