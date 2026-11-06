@@ -24,9 +24,9 @@ Browser: encrypted note + local proof
 
 ## Evidence
 
-A locally served production build completed a real browser deposit, encrypted backup, fresh-profile restore and claim through Nox. [Claim 0x6fd9…f8e9](https://explorer.altmempool.wtf/tx/0x6fd9da50ae8eda89f4a15b05b7eb9f1e0acc9248b5bb58431ec8c5f2a603f8e9?node=https%3A%2F%2Faltmempool.forshtat.com%2Frpc) was included in devnet block 4386. All three frames succeeded; the pool paid gas and a previously empty recipient received **0.09614 devnet ETH** after a **0.00386 ETH** claim fee. The canonical submission rejected the validation prefix; the normal alternative mempool admitted the claim. [Full reproducible evidence and limits](protocol/EVIDENCE.md).
+A hosted browser run on [0xpay.fun](https://0xpay.fun/) completed a 0.1 devnet ETH deposit, encrypted note backup, fresh-profile restore and private send through Nox. [The claim](https://explorer.altmempool.wtf/tx/0x0aace393ed7d593fc01707901cfe2f09cbce59befead4db802816b7bd3251d72?node=https%3A%2F%2Faltmempool.forshtat.com%2Frpc) was included in block 6078; a previously empty recipient received **0.09614 devnet ETH** after a **0.00386 ETH** claim fee. The canonical mempool rejected the validation prefix; the normal alternative mempool admitted it. After reload, the restored wallet showed **0 unspent notes**. [Transaction evidence and limits](protocol/EVIDENCE.md).
 
-That rehearsal does not prove that every hosted browser, worker or mobile device can complete the same flow. The devnet can reset and erase explorer history. A receipt shows inclusion, not chain finality.
+Nox connection can time out; one fresh reload needed a second attempt. This run does not prove every browser or worker can complete the flow. The devnet can reset and erase explorer history. A receipt shows inclusion, not chain finality.
 
 ## Run and inspect
 
