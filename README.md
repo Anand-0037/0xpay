@@ -4,6 +4,15 @@
 
 The browser opens on a dashboard with public balance, locally encrypted private notes, token balances, and activity. It offers private send, payment links, and a step-by-step transaction view. Application RPC calls use the Nox Anon-RPC worker by default and stop if that route fails. The worker's bootstrap lookup and page/artifact downloads are separate network paths.
 
+```text
+Browser: encrypted notes + local proof
+  → Anon-RPC worker → devnet RPC / normal sidecar → builder
+
+Frame 0: verify fresh sender
+Frame 1: pool verifies proof and approves gas payment
+Frame 2: pool pays recipient and marks the note spent
+```
+
 ## Run the wallet
 
 Use Node 24 and the checked-in lockfile:
@@ -26,13 +35,24 @@ For a protocol rebuild, install each subpackage with `npm ci --ignore-scripts`, 
 
 ## Evidence and current limit
 
-The [public devnet evidence](protocol/EVIDENCE.md) records the deployed/staked pool, deposit, a successful exact-signed ethrex simulation of all three claim frames, and canonical mempool rejection above its 100,000 validation-gas limit. The public alternative sidecar rejected the claim because its precompile allowlist was empty, so **there is no public included Groth16 claim yet**.
+The [public devnet evidence](protocol/EVIDENCE.md) records a real included claim: `0x400610e5b79a02dbf8fe7e37127aa93b842a5265c2f859f5983f285af3a073ce`, block **3664**. All three frames succeeded, the pool paid gas, and a fresh recipient received **0.09714 devnet ETH** from a zero balance. The same signed claim was rejected by canonical prefix-gas rules and admitted by normal alternative-mempool submission. The earlier gateway timeout was resolved by submitting the identical transaction to the documented miner sidecar after verifying its hash and simulation.
+
+[Open the included claim and its 24 passing admission checks](https://explorer.altmempool.wtf/tx/0x400610e5b79a02dbf8fe7e37127aa93b842a5265c2f859f5983f285af3a073ce?node=https%3A%2F%2Faltmempool.forshtat.com%2Frpc).
 
 A separate local sidecar configured with BN254 precompiles admitted and included claim `0xaa61ab27648734771229378ca370e36c774b1c8a4cbded9cf0ecc0b3a9b42ebb` (local block 198, type 6, receipt status success). Replay, recipient tampering, wrong root, and wrong second frame were rejected in local negative controls. This local CLI used direct loopback RPC, not Anon-RPC. The browser route was separately observed reaching public devnet chain 1337 through Nox; an end-to-end browser deposit and claim remains unverified.
 
 ## Privacy and safety
 
 The deposit amount and transaction are public. A claim's recipient and payout are public. Deposit-to-claim linkage is obscured only within the pool's anonymity set; small pools, timing, and fixed denominations still leak context. Anon-RPC hides the browser's IP from the RPC for routed calls, but the RPC still sees request contents. A payment link is a bearer secret in a URL fragment: anyone who receives it can claim the note. The link-claim payout goes to the receiver's unlocked wallet; a fresh zero-ETH key submits the frame.
+
+Recovery words restore the funding account, but they do **not** reconstruct randomly generated private notes. The wallet can export and restore a separate encrypted note backup; its file and password must be kept safely. The backup flow is covered by local tests but has not yet been verified in a fresh browser, so this devnet build is not ready for real funds.
+
+## CROPS
+
+- **C:** The app has no application backend, but the hosted frontend, Anon-RPC worker/bootstrap and configured devnet sidecar/builder remain availability dependencies. Source and a local protocol CLI are available; the app stops when its private route fails.
+- **O:** Authored source uses the repository's MIT license. The generated SnarkJS verifier retains its GPL-3.0 header and upstream notices. Rebuilding requires the documented circuit toolchain and dependencies.
+- **P:** Routed RPC requests expose their contents to the RPC provider while reducing direct client-IP linkage. Page loads, bootstrap and proof-artifact downloads are separate paths; public deposits, recipients, amounts and timing remain visible. There are no client analytics.
+- **S:** Wallet keys and notes are encrypted locally and bound to the unlocked wallet session. Trust assumptions include the development setup, unaudited contracts, worker/bootstrap and sidecar/builder; recovery words alone are not a private-note backup.
 
 This is unaudited devnet software using a development trusted setup and draft ERC-8421 frame transactions. Do not use it with real funds. The design reuses the established fixed-note pool pattern, Poseidon and Groth16 tooling from Circom/SnarkJS, the Hegota support package, Anon-RPC's browser harness, and Kazuhiko Arase's MIT-licensed QR generator (license header preserved in `src/pay/vendor/qrcode.mjs`). AI tools assisted with planning, implementation, tests, and copy; project-specific source and design provenance must be disclosed in the hackathon submission.
 
