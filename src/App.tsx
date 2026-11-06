@@ -5,6 +5,7 @@ import { bindEthersToPrivateRoute, unbindEthersRoute } from './rpc/ethers-transp
 import { WalletPanel } from './wallet/WalletPanel'
 import type { WalletSession } from './wallet/lifecycle'
 import { ConnectionDetails } from './ui/ConnectionDetails'
+import { PaymentUseCases } from './ui/PaymentUseCases'
 import { trafficSnapshot } from './net/network-guard'
 import brandLogo from './assets/0xpay-logo.png'
 import './App.css'
@@ -108,7 +109,7 @@ function App() {
   return <div className="app-shell">
     <header className="app-header">
       <strong className="brand"><img src={brandLogo} alt="" />0xPay</strong>
-      <span className="network-context">Ethereum Sepolia</span>
+      <span className="network-context">Sepolia testnet</span>
       <button type="button" className={`route-chip ${route.status}`} aria-expanded={connectionOpen} aria-controls="connection-details" onClick={() => setConnectionOpen(true)}>
         <span className="route-dot" aria-hidden="true" />{routeLabel}
       </button>
@@ -119,9 +120,11 @@ function App() {
 
     <main className="wallet-main">
       <WalletPanel routeVersion={route.status === 'ready' ? route.generation : -1} blockNumber={route.status === 'ready' ? route.blockNumber : null} engineReady={engine.status === 'ready'} shieldFeeBasisPoints={engine.status === 'ready' ? engine.shieldFeeBasisPoints : null} connectionFailed={route.status === 'failed' || engine.status === 'failed'} onRetry={retryRoute} session={wallet} onSession={setWallet} />
+      {!wallet && <PaymentUseCases />}
       {engine.status === 'failed' && engine.reload && <div className="route-error" role="alert">{engine.message} <button type="button" onClick={retryRoute}>Refresh app</button></div>}
       {wallet && route.status === 'failed' && <div className="route-error" role="alert">Private route is down. No direct RPC fallback is used. <button type="button" onClick={retryRoute}>Reconnect</button></div>}
     </main>
+    <footer className="app-footer"><span>0xPay</span><nav aria-label="Footer"><a href="https://github.com/Anand-0037/0xpay" target="_blank" rel="noopener noreferrer">Source</a><a href="https://x.com/AnandVashisht15" target="_blank" rel="noopener noreferrer" aria-label="Anand on X">X</a></nav></footer>
   </div>
 }
 
