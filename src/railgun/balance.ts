@@ -15,10 +15,9 @@ type Listener = (update: PrivateWethBalanceUpdate) => void
 const network = NETWORK_CONFIG[NetworkName.EthereumSepolia]
 const wethAddress = network.baseToken.wrappedAddress.toLowerCase()
 const listeners = new Map<string, Set<Listener>>()
-const refreshes = new Map<string, Promise<void>>()
-const spendable = new Map<string, { amountWei: bigint; revision: number }>()
+const refreshes = new Map<string, Promise<bigint>>()
+const scans = new Map<string, Promise<void>>()
 let callbackReady: Promise<void> | undefined
-let nextRevision = 0
 
 function onBalancesUpdated(event: RailgunBalancesEvent) {
   if (event.txidVersion !== TXIDVersion.V2_PoseidonMerkle ||
@@ -26,9 +25,6 @@ function onBalancesUpdated(event: RailgunBalancesEvent) {
       event.balanceBucket === RailgunWalletBalanceBucket.Spent) return
   const amountWei = event.erc20Amounts.reduce((total, token) =>
     token.tokenAddress.toLowerCase() === wethAddress ? total + token.amount : total, 0n)
-  if (event.balanceBucket === RailgunWalletBalanceBucket.Spendable) {
-    spendable.set(event.railgunWalletID, { amountWei, revision: ++nextRevision })
-  }
   const matching = listeners.get(event.railgunWalletID)
   if (!matching?.size) return
   const update: PrivateWethBalanceUpdate = {
@@ -63,37 +59,58 @@ export async function observePrivateWethBalance(walletId: string, listener: List
   }
 }
 
-export async function refreshPrivateWethBalance(walletId: string): Promise<void> {
-  if (!walletId) throw new Error('Unlock a private wallet before reading its balance')
-  await ensureCallback()
-  const existing = refreshes.get(walletId)
+function beginSdkScan(walletId: string): Promise<void> {
+  const existing = scans.get(walletId)
   if (existing) return existing
   const run = (async () => {
     const { refreshBalances } = await import('@railgun-community/wallet')
     await refreshBalances(network.chain, [walletId])
   })()
+  scans.set(walletId, run)
+  void run.finally(() => { if (scans.get(walletId) === run) scans.delete(walletId) }).catch(() => {})
+  return run
+}
+
+/** SDK UTXO balance callbacks can precede the later TXID scan's completion.
+ * Wait for an actual new Spendable callback, not for all background work to end.
+ * This proves a received SDK balance, not that every chain scan reached its tip.
+ */
+export function createFreshBalanceReader(
+  observe: (walletId: string, listener: Listener) => Promise<() => void>,
+  scan: (walletId: string) => Promise<void>, timeoutMs = 120_000,
+) {
+  return async (walletId: string): Promise<bigint> => {
+    let acceptFresh: (amountWei: bigint) => void = () => {}
+    const fresh = new Promise<bigint>((resolve) => { acceptFresh = resolve })
+    const unsubscribe = await observe(walletId, (update) => {
+      if (update.walletId === walletId && update.bucket === RailgunWalletBalanceBucket.Spendable) acceptFresh(update.amountWei)
+    })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('No fresh spendable balance was received. Its amount is unknown; retry when the private route is ready.')), timeoutMs)
+      })
+      return await Promise.race([fresh, scan(walletId).then(() => fresh), timeout])
+    } finally {
+      if (timer) clearTimeout(timer)
+      unsubscribe()
+    }
+  }
+}
+
+const readFreshBalance = createFreshBalanceReader(observePrivateWethBalance, beginSdkScan)
+
+export async function refreshPrivateWethBalance(walletId: string): Promise<bigint> {
+  if (!walletId) throw new Error('Unlock a private wallet before reading its balance')
+  const existing = refreshes.get(walletId)
+  if (existing) return existing
+  const run = readFreshBalance(walletId)
   refreshes.set(walletId, run)
-  try { await run }
+  try { return await run }
   finally { if (refreshes.get(walletId) === run) refreshes.delete(walletId) }
 }
 
-/** Require a fresh SDK spendable event, including POI status, before a private send. */
+/** Require a fresh SDK Spendable event, including the SDK's POI bucket decision. */
 export async function verifiedSpendableWeth(walletId: string): Promise<bigint> {
-  const before = spendable.get(walletId)?.revision ?? 0
-  let acceptFresh: (amountWei: bigint) => void = () => {}
-  const fresh = new Promise<bigint>((resolve) => { acceptFresh = resolve })
-  const unsubscribe = await observePrivateWethBalance(walletId, (update) => {
-    if (update.bucket === RailgunWalletBalanceBucket.Spendable &&
-        (spendable.get(walletId)?.revision ?? 0) > before) acceptFresh(update.amountWei)
-  })
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error('Spendable WETH was not confirmed by a fresh wallet scan')), 120_000)
-    })
-    return await Promise.race([refreshPrivateWethBalance(walletId).then(() => fresh), timeout])
-  } finally {
-    if (timer) clearTimeout(timer)
-    unsubscribe()
-  }
+  return refreshPrivateWethBalance(walletId)
 }

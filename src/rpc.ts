@@ -10,12 +10,41 @@ const NYM_SPECIFIER = '0x3aCD9742C68F6d993066Ae25533e09b9e1f60eD0'
 const BOOTSTRAP_SELECTORS = new Set(['0x3898587d', '0x1c67ff29'])
 const WORKER_RESOLVERS_SELECTOR = '0x1c67ff29'
 const READ_TIMEOUT_MS = 60_000
+// A cold mixnet worker can need substantially longer than a warm RPC request.
+const CONNECT_TIMEOUT_MS = 90_000
 let nextId = 1
 
-export type RouteStats = Readonly<{ attempted: number; completed: number; failed: number; bootstrapReads: number }>
+export type MethodCount = Readonly<{ attempted: number; completed: number; failed: number }>
+export type RouteStats = Readonly<{
+  attempted: number; completed: number; failed: number; bootstrapReads: number
+  methodCounts?: Readonly<Record<string, MethodCount>>
+}>
 export type RouteStatus = 'connecting' | 'ready' | 'degraded' | 'failed' | 'closed'
 type Worker = { ready: Promise<unknown>; fetch: (url: string, init: RequestInit) => Promise<Response>; close: () => void }
 type WorkerFactory = (onBootstrap: (selector: string, result: unknown) => void) => Worker
+
+// Keep telemetry bounded to known method names. Never retain params, IDs, raw
+// transaction bytes, or arbitrary strings supplied as a JSON-RPC method.
+const COUNTED_METHODS = new Set([
+  'eth_chainId', 'eth_blockNumber', 'eth_getBalance', 'eth_call', 'eth_getLogs',
+  'eth_getBlockByNumber', 'eth_getBlockByHash', 'eth_getTransactionByHash',
+  'eth_getTransactionReceipt', 'eth_getTransactionCount', 'eth_gasPrice',
+  'eth_maxPriorityFeePerGas', 'eth_feeHistory', 'eth_estimateGas',
+  'net_version', 'web3_clientVersion', 'eth_sendRawTransaction',
+])
+
+function countedMethods(body: string | Uint8Array): string[] {
+  try {
+    const value: unknown = JSON.parse(typeof body === 'string' ? body : new TextDecoder().decode(body))
+    const calls = Array.isArray(value) ? value : [value]
+    if (!calls.length) return ['other']
+    return calls.map((call: unknown) => {
+      if (typeof call !== 'object' || call === null || !('method' in call) ||
+        typeof call.method !== 'string' || !COUNTED_METHODS.has(call.method)) return 'other'
+      return call.method
+    })
+  } catch { return ['other'] }
+}
 
 async function bootstrapRequest({ method, params }: { method: string; params?: unknown[] }) {
   const call = params?.[0]
@@ -43,12 +72,14 @@ async function bootstrapRequest({ method, params }: { method: string; params?: u
 export class PrivateRpc {
   private readonly workerFactory: WorkerFactory
   private worker: Worker
+  private workerClosed = false
   private generation = 0
   private statusValue: RouteStatus = 'connecting'
   private attempted = 0
   private completed = 0
   private failed = 0
   private bootstrapReads = 0
+  private methodCounts = new Map<string, { attempted: number; completed: number; failed: number }>()
   private resolverUrls = new Set<string>()
   constructor(workerFactory: WorkerFactory = (onBootstrap) => new AnonRpcWorker({
     address: NYM_SPECIFIER, preExisting: { rpcProvider: { request: async (payload: { method: string; params?: unknown[] }) => {
@@ -65,6 +96,11 @@ export class PrivateRpc {
     return this.workerFactory((selector, result) => {
       if (generation === this.generation && this.statusValue !== 'closed') this.recordBootstrap(selector, result)
     })
+  }
+  private closeWorker() {
+    if (this.workerClosed) return
+    this.workerClosed = true
+    this.worker.close()
   }
   private recordBootstrap(selector: string, result: unknown) {
     this.bootstrapReads += 1
@@ -84,38 +120,66 @@ export class PrivateRpc {
     try {
       await Promise.race([
         this.worker.ready,
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Nym connection timed out')), 30_000) }),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Nym connection timed out')), CONNECT_TIMEOUT_MS) }),
       ])
+      // A replaced worker may finish starting after Reconnect has installed a
+      // new one. Its old startup must never issue requests on the new route.
+      if (generation !== this.generation) throw new Error('Private RPC connection was replaced')
       const chainId = await this.readHex('eth_chainId')
+      if (generation !== this.generation) throw new Error('Private RPC connection was replaced')
       if (chainId.toLowerCase() !== '0xaa36a7') throw new Error(`Unexpected chain ${chainId}`)
       const blockNumber = Number.parseInt(await this.readHex('eth_blockNumber'), 16)
       if (generation !== this.generation) throw new Error('Private RPC connection was replaced')
       this.statusValue = 'ready'
       return { chainId, blockNumber }
     } catch (error) {
-      if (generation === this.generation) this.statusValue = 'failed'
+      if (generation === this.generation) {
+        this.statusValue = 'failed'
+        this.closeWorker()
+        this.resolverUrls.clear()
+        setWorkerBundleResolvers([])
+      }
       throw error
     } finally { if (timer) clearTimeout(timer) }
   }
   async reconnect() {
     if (this.statusValue === 'closed') throw new Error('Private RPC route is closed')
     this.generation += 1
-    this.worker.close()
+    this.closeWorker()
     this.resolverUrls.clear()
     setWorkerBundleResolvers([])
     this.worker = this.makeWorker()
+    this.workerClosed = false
     this.statusValue = 'connecting'
     return this.connect()
   }
+  disconnect() {
+    if (this.statusValue === 'closed') return
+    this.generation += 1
+    this.statusValue = 'degraded'
+    this.closeWorker()
+    this.resolverUrls.clear()
+    setWorkerBundleResolvers([])
+  }
   get stats(): RouteStats {
     return { attempted: this.attempted, completed: this.completed, failed: this.failed,
-      bootstrapReads: this.bootstrapReads }
+      bootstrapReads: this.bootstrapReads,
+      methodCounts: Object.fromEntries([...this.methodCounts].map(([method, counts]) => [method, { ...counts }])) }
+  }
+  private countMethods(methods: readonly string[], outcome: keyof MethodCount) {
+    for (const method of methods) {
+      let counts = this.methodCounts.get(method)
+      if (!counts) { counts = { attempted: 0, completed: 0, failed: 0 }; this.methodCounts.set(method, counts) }
+      counts[outcome]++
+    }
   }
   async fetchRpc(body: string | Uint8Array): Promise<Response> {
     if (this.statusValue !== 'ready' && this.statusValue !== 'connecting') throw new Error('Private RPC route needs reconnecting')
     const generation = this.generation
     const worker = this.worker
+    const methods = countedMethods(body)
     this.attempted += 1
+    this.countMethods(methods, 'attempted')
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     try {
@@ -133,11 +197,18 @@ export class PrivateRpc {
         }),
       ])
       if (generation !== this.generation) throw new Error('Private RPC response came from a replaced route')
+      // Another concurrent request can stop this same worker while this reply
+      // is in flight. Do not release that late reply as fresh wallet state.
+      if (this.statusValue !== 'ready' && this.statusValue !== 'connecting') {
+        throw new Error('Private RPC route stopped before the response arrived')
+      }
       if (!response.ok) throw new Error(`Private RPC returned HTTP ${response.status}`)
       this.completed += 1
+      this.countMethods(methods, 'completed')
       return response
     } catch (error) {
       this.failed += 1
+      this.countMethods(methods, 'failed')
       if (generation === this.generation) this.statusValue = 'degraded'
       throw error
     } finally {
@@ -160,6 +231,6 @@ export class PrivateRpc {
     this.statusValue = 'closed'
     this.resolverUrls.clear()
     setWorkerBundleResolvers([])
-    this.worker.close()
+    this.closeWorker()
   }
 }
