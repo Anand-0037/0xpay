@@ -426,3 +426,29 @@
   .route-chip.connecting .route-dot, .connection-state.connecting .route-dot { animation: none; }
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0s !important; animation-duration: 0s !important; }
 }
+
+/* Numbered recovery inputs keep words masked until explicitly revealed. */
+.recovery-input { min-width:0; padding:0; margin:0; border:0; }
+.recovery-input legend { margin-bottom:12px; font-weight:650; font-size:14px; }
+.recovery-input-controls { display:flex; flex-wrap:wrap; align-items:center; gap:10px; justify-content:space-between; margin-bottom:14px; }
+.recovery-input-controls label { display:flex; align-items:center; gap:8px; font-size:13px; }
+.recovery-input-controls select,.recovery-input-controls button { padding:8px; border:1px solid var(--border,#d8cdbc); border-radius:8px; background:transparent; color:inherit; font:inherit; }
+.recovery-input-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.wallet-form .recovery-input-grid label { position:relative; display:block; min-width:0; }
+.recovery-input-grid label>span { position:absolute; left:9px; top:50%; transform:translateY(-50%); font-size:11px; opacity:.7; }
+.wallet-form .recovery-input-grid input { min-width:0; width:100%; padding:12px 8px 12px 30px; font-size:14px; }
+.recovery-input>small { display:block; margin-top:12px; font-size:12px; line-height:1.6; }
+@media(max-width:420px) { .recovery-input-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+/* Match movement to actual route and onboarding states. */
+.route-chip::before{content:"";width:8px;height:8px;border-radius:50%;background:#7b7771;flex:none}
+.route-chip.ready::before{background:#348153}.route-chip.failed::before{background:#b83c2b}
+.route-chip.connecting::before{background:var(--accent);animation:route-pulse 1.6s ease-in-out infinite}
+.wallet-onboarding .wallet-intro,.wallet-setup-card{animation:wallet-enter .4s ease-out both}
+.wallet-setup-card{animation-delay:.07s}
+.wallet-status{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:22px;padding:13px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel);white-space:normal}
+.wallet-status span{min-width:0;overflow-wrap:anywhere}.wallet-status code{font-size:12px}
+.wallet-status button{flex:none;min-height:40px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--raised);color:var(--ink);cursor:pointer}
+@keyframes wallet-enter{from{opacity:.4;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:720px){.wallet-status{display:flex;align-items:flex-start;font-size:12px}.wallet-status code{display:block;font-size:11px}}
+@media(prefers-reduced-motion:reduce){.route-chip::before,.wallet-onboarding .wallet-intro,.wallet-setup-card{animation:none!important;transition:none!important}}
