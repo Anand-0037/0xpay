@@ -47,6 +47,7 @@ export function SendPanel({ onQuote, onSubmit, onConfirm }: SendPanelProps) {
   const [transactionHash, setTransactionHash] = useState<string | null>(null)
   const [receipt, setReceipt] = useState<PrivateSendReceipt | null>(null)
   const [error, setError] = useState('')
+  const [journalWarning, setJournalWarning] = useState(false)
   const requestId = useRef(0)
   const mounted = useRef(true)
 
@@ -64,6 +65,7 @@ export function SendPanel({ onQuote, onSubmit, onConfirm }: SendPanelProps) {
     setTransactionHash(null)
     setReceipt(null)
     setError('')
+    setJournalWarning(false)
     setStage('draft')
   }
 
@@ -119,6 +121,7 @@ export function SendPanel({ onQuote, onSubmit, onConfirm }: SendPanelProps) {
         throw new Error('The wallet did not return a valid transaction hash.')
       }
       setTransactionHash(submission.transactionHash)
+      setJournalWarning(!submission.journalSaved)
       setStage('pending')
       await checkConfirmation(submission.transactionHash, currentId)
     } catch (cause) {
@@ -174,6 +177,7 @@ export function SendPanel({ onQuote, onSubmit, onConfirm }: SendPanelProps) {
         {stage === 'preparing' && <div className="send-progress" role="status"><p>Preparing RAILGUN proof and transaction. Your wallet approval follows.</p>{proofProgress !== null && <><progress value={proofProgress} max="100" aria-label="RAILGUN proof progress" /><span>SDK proof progress: {Math.floor(proofProgress)}%</span></>}</div>}
         {stage === 'pending' && <p className="send-progress" role="status">Transaction submitted. Waiting for the Sepolia receipt…</p>}
         {transactionHash && <a className="send-explorer" href={`https://sepolia.etherscan.io/tx/${transactionHash}`} target="_blank" rel="noopener noreferrer">View submitted transaction ↗</a>}
+        {journalWarning && <p role="alert">This browser could not save the transaction. Keep its hash before closing this page.</p>}
       </div>}
 
       {stage === 'error' && <div className="send-error" role="alert"><strong>Send not confirmed</strong><p>{error}</p><p>Check your wallet activity before starting a new send. A wallet error may not tell us whether a transaction was broadcast.</p><button type="button" onClick={() => edit(recipient, amount)}>Start a new review</button></div>}

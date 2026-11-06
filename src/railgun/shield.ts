@@ -7,6 +7,7 @@ import {
   gasEstimateForShieldBaseToken, getShieldPrivateKeySignatureMessage, populateShieldBaseToken,
 } from '@railgun-community/wallet'
 import { APP_RPC_URL } from '../rpc'
+import { findTransaction, markTransaction, recordSubmitted, unresolvedTransaction } from '../domain/tx-journal'
 import { getConnectedInjectedSigner } from '../wallet/injected'
 
 const NETWORK = NetworkName.EthereumSepolia
@@ -25,7 +26,7 @@ export type ShieldQuote = {
   expiresAt: number
 }
 
-export type ShieldSubmission = { status: 'submitted'; transactionHash: string; explorerUrl: string }
+export type ShieldSubmission = { status: 'submitted'; transactionHash: string; explorerUrl: string; journalSaved: boolean }
 export type ShieldReceipt =
   | { status: 'confirmed' | 'reverted'; transactionHash: string; explorerUrl: string; blockNumber: number }
   | { status: 'unknown'; transactionHash: string; explorerUrl: string; message: string }
@@ -51,6 +52,7 @@ function checkedFeeData(maxFeePerGas: bigint | null, maxPriorityFeePerGas: bigin
 export async function quoteEthShield(amountWei: bigint, recipientAddress: string, feeBasisPoints: bigint): Promise<ShieldQuote> {
   if (amountWei <= 0n) throw new Error('Shield amount must be greater than zero')
   if (feeBasisPoints < 0n || feeBasisPoints >= 10_000n) throw new Error('Shield fee is unavailable')
+  if (unresolvedTransaction('shield')) throw new Error('A previous shield is unresolved. Check its transaction before sending another.')
   pendingShield = null
 
   const signer = await getConnectedInjectedSigner()
@@ -122,20 +124,32 @@ export async function submitEthShield(quote: ShieldQuote): Promise<ShieldSubmiss
     // An extension may broadcast before reporting a transport error. Never reuse this draft.
     const sent = await signer.sendTransaction({ ...transaction, chainId: 11155111 })
     submittedShields.set(sent.hash, { sourceAddress: draft.quote.sourceAddress })
-    return { status: 'submitted', transactionHash: sent.hash, explorerUrl: `${EXPLORER_URL}${sent.hash}` }
+    let journalSaved = true
+    try { recordSubmitted('shield', sent.hash, draft.quote.sourceAddress) }
+    catch { journalSaved = false }
+    return { status: 'submitted', transactionHash: sent.hash, explorerUrl: `${EXPLORER_URL}${sent.hash}`, journalSaved }
   } finally { submitting = false }
 }
 
 export async function confirmEthShield(transactionHash: string): Promise<ShieldReceipt> {
-  const submitted = submittedShields.get(transactionHash)
+  const inSession = submittedShields.get(transactionHash)
+  let saved: ReturnType<typeof findTransaction>
+  try { saved = findTransaction(transactionHash) }
+  catch (cause) { if (!inSession) throw cause }
+  const submitted = inSession ?? (saved?.kind === 'shield' ? { sourceAddress: saved.from } : undefined)
   if (!submitted) throw new Error('Unknown shield transaction in this session')
   const provider = privateProvider()
   try {
     const receipt = await provider.waitForTransaction(transactionHash, 1, 180_000)
-    if (!receipt) return { status: 'unknown', transactionHash, explorerUrl: `${EXPLORER_URL}${transactionHash}`, message: 'Confirmation is still pending. Check the explorer and retry.' }
+    if (!receipt) {
+      if (saved) try { markTransaction(transactionHash, 'unknown') } catch { /* receipt remains authoritative */ }
+      return { status: 'unknown', transactionHash, explorerUrl: `${EXPLORER_URL}${transactionHash}`, message: 'Confirmation is still pending. Check the explorer and retry.' }
+    }
     if (!receipt.to || getAddress(receipt.to) !== getAddress(NETWORK_CONFIG[NETWORK].relayAdaptContract) ||
       getAddress(receipt.from) !== submitted.sourceAddress) throw new Error('Confirmed transaction does not match this shield')
-    return { status: receipt.status === 1 ? 'confirmed' : 'reverted', transactionHash, explorerUrl: `${EXPLORER_URL}${transactionHash}`, blockNumber: receipt.blockNumber }
+    const status = receipt.status === 1 ? 'confirmed' : 'reverted'
+    if (saved) try { markTransaction(transactionHash, status) } catch { /* receipt remains authoritative */ }
+    return { status, transactionHash, explorerUrl: `${EXPLORER_URL}${transactionHash}`, blockNumber: receipt.blockNumber }
   } catch (cause) {
     return { status: 'unknown', transactionHash, explorerUrl: `${EXPLORER_URL}${transactionHash}`,
       message: cause instanceof Error ? cause.message : 'Could not verify the shield transaction' }

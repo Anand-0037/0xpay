@@ -49,6 +49,7 @@ export function ShieldPanel({ onQuote, onSubmit, onConfirm }: ShieldPanelProps) 
   const [transactionHash, setTransactionHash] = useState<string | null>(null)
   const [confirmation, setConfirmation] = useState<ShieldReceipt | null>(null)
   const [error, setError] = useState('')
+  const [journalWarning, setJournalWarning] = useState(false)
   const requestId = useRef(0)
   const mounted = useRef(true)
 
@@ -64,6 +65,7 @@ export function ShieldPanel({ onQuote, onSubmit, onConfirm }: ShieldPanelProps) 
     setTransactionHash(null)
     setConfirmation(null)
     setError('')
+    setJournalWarning(false)
     setStage('draft')
   }
 
@@ -100,6 +102,7 @@ export function ShieldPanel({ onQuote, onSubmit, onConfirm }: ShieldPanelProps) 
         throw new Error('The wallet did not return a valid transaction hash.')
       }
       setTransactionHash(result.transactionHash)
+      setJournalWarning(!result.journalSaved)
       setStage('pending')
       await checkConfirmation(result.transactionHash, currentId)
     } catch (cause) {
@@ -171,6 +174,7 @@ export function ShieldPanel({ onQuote, onSubmit, onConfirm }: ShieldPanelProps) 
         {stage === 'submitting' && <p className="shield-progress" role="status">Waiting for wallet approval…</p>}
         {stage === 'pending' && <p className="shield-progress" role="status">Transaction submitted. Waiting for the Sepolia receipt…</p>}
         {transactionHash && <a className="shield-explorer" href={`https://sepolia.etherscan.io/tx/${transactionHash}`} target="_blank" rel="noopener noreferrer">View submitted transaction ↗</a>}
+        {journalWarning && <p role="alert">This browser could not save the transaction. Keep its hash before closing this page.</p>}
       </div>}
 
       {stage === 'error' && <div className="shield-error" role="alert"><strong>Shield not confirmed</strong><p>{error}</p><p>Check your wallet activity before starting another quote. A rejected request and an unconfirmed broadcast can look alike here.</p><button type="button" onClick={() => { setQuote(null); setError(''); setStage('draft') }}>Start a new review</button></div>}

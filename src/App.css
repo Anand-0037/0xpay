@@ -206,6 +206,16 @@
 .send-error { border-color: #8a4945; background: #2b1d20; color: #ffc3b8; }
 .send-error p { color: #e4bbb4; }
 
+.activity-panel { margin-top: 22px; padding: 28px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); }
+.activity-heading h2 { margin: 4px 0 18px; font-size: 24px; letter-spacing: -.035em; }
+.activity-panel ul { margin: 0; padding: 0; list-style: none; }
+.activity-panel li { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 14px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.activity-panel li > div { display: grid; gap: 4px; min-width: 110px; }
+.activity-panel li span { color: var(--muted); text-transform: capitalize; }
+.activity-panel a { color: #ffb782; text-underline-offset: 3px; }
+.activity-panel button { margin-left: auto; min-height: 36px; padding: 7px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--raised); color: var(--ink); cursor: pointer; }
+.activity-panel button:disabled { opacity: .48; cursor: not-allowed; }
+
 .connection-overlay { position: fixed; inset: 0; z-index: 20; display: flex; justify-content: flex-end; }
 .connection-scrim { position: absolute; inset: 0; border: 0; background: rgb(0 0 0 / 68%); cursor: pointer; }
 .connection-drawer { position: relative; width: min(100%, 510px); height: 100%; overflow-y: auto; padding: 31px; border-left: 1px solid #484147; background: #1b1c20; box-shadow: -18px 0 50px rgb(0 0 0 / 35%); }
@@ -249,6 +259,7 @@
   .send-review { padding: 17px; }
   .send-review dl > div { display: grid; gap: 5px; }
   .send-review dd { max-width: 100%; text-align: left; }
+  .activity-panel { padding: 24px 20px; }
   .connection-drawer { padding: 25px 20px; }
   .connection-list > div { grid-template-columns: 1fr; gap: 4px; }
 }

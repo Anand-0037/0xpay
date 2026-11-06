@@ -8,6 +8,7 @@ import {
   populateProvedTransfer,
 } from '@railgun-community/wallet'
 import { APP_RPC_URL } from '../rpc'
+import { findTransaction, markTransaction, recordSubmitted, unresolvedTransaction } from '../domain/tx-journal'
 import { getConnectedInjectedSigner } from '../wallet/injected'
 import { unlockedEncryptionKey, unlockedWalletId } from '../wallet/lifecycle'
 import { verifiedSpendableWeth } from './balance'
@@ -27,7 +28,7 @@ export type PrivateSendQuote = {
   maxNetworkFeeWei: bigint
   expiresAt: number
 }
-export type PrivateSendSubmission = { status: 'submitted'; transactionHash: string; explorerUrl: string }
+export type PrivateSendSubmission = { status: 'submitted'; transactionHash: string; explorerUrl: string; journalSaved: boolean }
 export type PrivateSendReceipt =
   | { status: 'confirmed' | 'reverted'; transactionHash: string; explorerUrl: string; blockNumber: number }
   | { status: 'unknown'; transactionHash: string; explorerUrl: string; message: string }
@@ -63,6 +64,7 @@ function recipients(amountWei: bigint, recipientAddress: string): RailgunERC20Am
 export async function quotePrivateWethSend(amountWei: bigint, recipientAddress: string): Promise<PrivateSendQuote> {
   if (amountWei <= 0n) throw new Error('Send amount must be greater than zero')
   assertValidRailgunAddress(recipientAddress)
+  if (unresolvedTransaction('send')) throw new Error('A previous private send is unresolved. Check its transaction before sending another.')
   pendingSend = null
   const walletId = unlockedWalletId()
   const encryptionKey = unlockedEncryptionKey()
@@ -141,20 +143,32 @@ export async function submitPrivateWethSend(quote: PrivateSendQuote,
     if (getAddress(await checkedSigner.getAddress()) !== draft.quote.publicGasPayer) throw new Error('Public gas wallet changed before sending')
     const response = await checkedSigner.sendTransaction({ ...transaction, chainId: 11155111 })
     sent.set(response.hash, { gasPayer: draft.quote.publicGasPayer })
-    return { status: 'submitted', transactionHash: response.hash, explorerUrl: `${EXPLORER_URL}${response.hash}` }
+    let journalSaved = true
+    try { recordSubmitted('send', response.hash, draft.quote.publicGasPayer) }
+    catch { journalSaved = false }
+    return { status: 'submitted', transactionHash: response.hash, explorerUrl: `${EXPLORER_URL}${response.hash}`, journalSaved }
   } finally { submitting = false }
 }
 
 export async function confirmPrivateWethSend(transactionHash: string): Promise<PrivateSendReceipt> {
-  const prior = sent.get(transactionHash)
+  const inSession = sent.get(transactionHash)
+  let saved: ReturnType<typeof findTransaction>
+  try { saved = findTransaction(transactionHash) }
+  catch (cause) { if (!inSession) throw cause }
+  const prior = inSession ?? (saved?.kind === 'send' ? { gasPayer: saved.from } : undefined)
   if (!prior) throw new Error('Unknown private send transaction in this session')
   const provider = privateProvider()
   try {
     const receipt = await provider.waitForTransaction(transactionHash, 1, 180_000)
-    if (!receipt) return { status: 'unknown', transactionHash, explorerUrl: `${EXPLORER_URL}${transactionHash}`, message: 'Confirmation is still pending. Check the explorer and retry.' }
+    if (!receipt) {
+      if (saved) try { markTransaction(transactionHash, 'unknown') } catch { /* receipt remains authoritative */ }
+      return { status: 'unknown', transactionHash, explorerUrl: `${EXPLORER_URL}${transactionHash}`, message: 'Confirmation is still pending. Check the explorer and retry.' }
+    }
     if (!receipt.to || getAddress(receipt.to) !== getAddress(NETWORK_CONFIG[NETWORK].proxyContract) ||
       getAddress(receipt.from) !== prior.gasPayer) throw new Error('Confirmed transaction does not match this private send')
-    return { status: receipt.status === 1 ? 'confirmed' : 'reverted', transactionHash, explorerUrl: `${EXPLORER_URL}${transactionHash}`, blockNumber: receipt.blockNumber }
+    const status = receipt.status === 1 ? 'confirmed' : 'reverted'
+    if (saved) try { markTransaction(transactionHash, status) } catch { /* receipt remains authoritative */ }
+    return { status, transactionHash, explorerUrl: `${EXPLORER_URL}${transactionHash}`, blockNumber: receipt.blockNumber }
   } catch (cause) {
     return { status: 'unknown', transactionHash, explorerUrl: `${EXPLORER_URL}${transactionHash}`,
       message: cause instanceof Error ? cause.message : 'Could not verify the send transaction' }

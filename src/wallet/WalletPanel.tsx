@@ -4,6 +4,7 @@ import { APP_RPC_URL } from '../rpc'
 import { ShieldPanel } from './ShieldPanel'
 import { SendPanel } from './SendPanel'
 import { PrivateBalance } from './PrivateBalance'
+import { ActivityPanel } from './ActivityPanel'
 import {
   browserWalletAvailable, connectInjectedWallet, forgetInjectedWallet, watchInjectedWallet,
   type InjectedAccount,
@@ -42,6 +43,7 @@ export function WalletPanel({ blockNumber, engineReady, shieldFeeBasisPoints, co
   const [fundingBalance, setFundingBalance] = useState<FundingBalance>(null)
   const [balanceRefresh, setBalanceRefresh] = useState(0)
   const [privateBalanceRefresh, setPrivateBalanceRefresh] = useState(0)
+  const [, setActivityRefresh] = useState(0)
   const [injected, setInjected] = useState<InjectedAccount | null>(null)
   const [connectingInjected, setConnectingInjected] = useState(false)
   const [injectedError, setInjectedError] = useState('')
@@ -193,11 +195,14 @@ export function WalletPanel({ blockNumber, engineReady, shieldFeeBasisPoints, co
         }}
         onSubmit={async (quote) => {
           const { submitEthShield } = await import('../railgun/shield')
-          return submitEthShield(quote)
+          const result = await submitEthShield(quote)
+          setActivityRefresh((value) => value + 1)
+          return result
         }}
         onConfirm={async (transactionHash) => {
           const { confirmEthShield } = await import('../railgun/shield')
           const receipt = await confirmEthShield(transactionHash)
+          setActivityRefresh((value) => value + 1)
           if (receipt.status === 'confirmed') setPrivateBalanceRefresh((value) => value + 1)
           return receipt
         }}
@@ -209,15 +214,24 @@ export function WalletPanel({ blockNumber, engineReady, shieldFeeBasisPoints, co
         }}
         onSubmit={async (quote, onProofProgress) => {
           const { submitPrivateWethSend } = await import('../railgun/send')
-          return submitPrivateWethSend(quote, onProofProgress)
+          const result = await submitPrivateWethSend(quote, onProofProgress)
+          setActivityRefresh((value) => value + 1)
+          return result
         }}
         onConfirm={async (transactionHash) => {
           const { confirmPrivateWethSend } = await import('../railgun/send')
           const receipt = await confirmPrivateWethSend(transactionHash)
+          setActivityRefresh((value) => value + 1)
           if (receipt.status === 'confirmed') setPrivateBalanceRefresh((value) => value + 1)
           return receipt
         }}
       />}
+      {!recoveryPhrase && <ActivityPanel routeReady={routeReady} onRecheck={async (kind, transactionHash) => {
+        const receipt = kind === 'shield'
+          ? await (await import('../railgun/shield')).confirmEthShield(transactionHash)
+          : await (await import('../railgun/send')).confirmPrivateWethSend(transactionHash)
+        if (receipt.status === 'confirmed') setPrivateBalanceRefresh((value) => value + 1)
+      }} />}
     </> : view === 'connect' ? <>
       <p>Connect a browser wallet on Sepolia for public funding. Your private balance uses a separate encrypted RAILGUN wallet.</p>
       {injected ? <>
