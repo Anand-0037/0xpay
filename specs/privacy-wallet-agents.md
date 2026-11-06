@@ -19,6 +19,12 @@ Retrieved venue rules and quotes form the public evidence pack. The researcher r
 
 Paper execution rechecks quote freshness, liquidity, budget, duplicate state, evidence expiry and the live route while holding the journal lock. A broken or unreadable journal stops execution. No paper record is a venue fill or profit claim.
 
+## Signed application policy
+
+The user requested a verifiable, revocable mandate instead of editable limits alone. A browser EOA reviews and signs an EIP-712 paper policy binding the agent, assessed account, market list, session/nonce, budget, order cap, worst price, spread, exposure and expiry. The agent receives no signer. The journal rechecks that signature and committed spend under its shared lock before saving; local revocation uses the same lock and stops queued work. New records retain the verified policy digest; earlier simulations are not retroactively signed.
+
+This is offchain application enforcement, not a token allowance, smart-account session key or venue order permission. ENS record matching is an isolated read adapter; ownership, names and live application wiring remain separate gates. Any future public name/hash binding must not be mistaken for private identity or automatic revocation.
+
 ## Evidence gates
 
 1. Observe real market data and exact onchain outcome/collateral mapping.
