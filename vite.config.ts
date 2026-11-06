@@ -9,6 +9,7 @@ const sdkEthers = createRequire(import.meta.url).resolve('ethers')
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: './',
   plugins: [react(), nodePolyfills({ globals: { Buffer: true, global: true, process: true } })],
   define: { global: 'globalThis' },
   resolve: { alias: [{ find: /^ethers$/, replacement: sdkEthers }] },
