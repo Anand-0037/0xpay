@@ -19,6 +19,9 @@ type Props = {
   engineReady: boolean
   shieldFeeBasisPoints: bigint | null
   connectionFailed: boolean
+  connectionMessage?: string
+  disconnectedByUser?: boolean
+  connectionActionLabel?: string
   onRetry: () => void
   session: WalletSession | null
   onSession: (session: WalletSession | null) => void
@@ -29,9 +32,10 @@ type FundingBalance =
   | { address: string; status: 'error'; message: string }
   | null
 
-export function WalletPanel({ routeVersion = 0, blockNumber, engineReady, shieldFeeBasisPoints, connectionFailed, onRetry, session, onSession }: Props) {
+export function WalletPanel({ routeVersion = 0, blockNumber, engineReady, shieldFeeBasisPoints, connectionFailed, connectionMessage, disconnectedByUser = false, connectionActionLabel = 'Reconnect', onRetry, session, onSession }: Props) {
   const [mode, setMode] = useState<'create' | 'import' | 'unlock'>(() => hasStoredVault() ? 'unlock' : 'create')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [phrase, setPhrase] = useState('')
   const [recoveryPhrase, setRecoveryPhrase] = useState('')
   const [showRecovery, setShowRecovery] = useState(false)
@@ -56,6 +60,7 @@ export function WalletPanel({ routeVersion = 0, blockNumber, engineReady, shield
       setRecoveryPhrase('')
       setAnswers(['', '', ''])
       setPassword('')
+      setShowPassword(false)
       setPhrase('')
       setShowRecovery(false)
       onSession(null)
@@ -69,7 +74,7 @@ export function WalletPanel({ routeVersion = 0, blockNumber, engineReady, shield
 
   const publicAddress = session?.publicAddress
   const copyPrefix = session ? `${session.id}:${session.generation}:` : ''
-  const routeReady = blockNumber !== null && !connectionFailed
+  const routeReady = blockNumber !== null && !connectionFailed && !disconnectedByUser
   const balanceForSource = fundingBalance?.address === publicAddress ? fundingBalance : null
   const hasGas = balanceForSource?.status === 'ready' && balanceForSource.wei > 0n
   const spendable = privateWeth?.walletId === session?.id && privateWeth?.sessionVersion === sessionVersion && privateWeth?.routeVersion === routeVersion ? privateWeth?.amount : undefined
@@ -104,7 +109,7 @@ export function WalletPanel({ routeVersion = 0, blockNumber, engineReady, shield
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!engineReady || blockNumber === null || busy) return
+    if (!engineReady || !routeReady || blockNumber === null || busy) return
     setBusy(true)
     setError('')
     try {
@@ -132,11 +137,13 @@ export function WalletPanel({ routeVersion = 0, blockNumber, engineReady, shield
         onSession(unlocked)
       }
       setPassword('')
+      setShowPassword(false)
       setPhrase('')
     } catch (cause) {
       if (hasStoredVault()) setMode('unlock')
       setError(cause instanceof Error ? cause.message : 'Wallet action failed')
     } finally {
+      setShowPassword(false)
       setBusy(false)
     }
   }
@@ -159,6 +166,7 @@ export function WalletPanel({ routeVersion = 0, blockNumber, engineReady, shield
       setShowRecovery(false)
       setAnswers(['', '', ''])
       setMode('unlock')
+      setShowPassword(false)
       setBusy(false)
     }
   }
@@ -191,11 +199,30 @@ export function WalletPanel({ routeVersion = 0, blockNumber, engineReady, shield
     setError('')
   }
 
+  function chooseSetup(next: 'create' | 'import') {
+    if (busy || mode === next) return
+    setMode(next); setPassword(''); setShowPassword(false); setPhrase(''); setError('')
+  }
+
+  function setupNavigation(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (busy || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const next = event.key === 'Home' ? 'create' : event.key === 'End' ? 'import' : mode === 'create' ? 'import' : 'create'
+    chooseSetup(next)
+    event.currentTarget.querySelector<HTMLButtonElement>(`[data-setup-mode="${next}"]`)?.focus()
+  }
+
+  const connectionNotice = (!routeReady || !engineReady) && <div className={`wallet-setup-connection${connectionFailed && !disconnectedByUser ? ' wallet-error' : ''}`} role={connectionFailed && !disconnectedByUser ? 'alert' : 'status'}>
+    <p>{disconnectedByUser ? 'You disconnected the private route. Reconnect to read balances or use this wallet.' : connectionMessage || (connectionFailed ? 'The private connection could not complete. Reconnect to continue.' : routeReady ? 'Preparing your wallet services…' : 'Connecting your private route…')}</p>
+    {(connectionFailed || disconnectedByUser) && <button type="button" onClick={onRetry} disabled={busy}>{connectionActionLabel}</button>}
+  </div>
+
   return <section className={`wallet-panel${session ? ' wallet-active' : ' wallet-onboarding'}`} aria-labelledby="wallet-panel-heading">
     {!session && <WalletIntro />}
     <div className={session ? 'wallet-content' : 'wallet-setup-card'}>
     <div className="wallet-panel-heading"><div><p className="eyebrow">{session ? '0XPAY WALLET' : mode === 'unlock' ? 'SAVED ON THIS DEVICE' : 'GET STARTED'}</p><h2 id="wallet-panel-heading">{session ? 'Your wallet' : mode === 'unlock' ? 'Welcome back' : mode === 'import' ? 'Restore your wallet' : 'Create your wallet'}</h2></div>{session && <button type="button" onClick={lock} disabled={busy}>Lock wallet</button>}</div>
     {session ? <>
+      {connectionNotice}
       {session.backupConfirmed && <PrivateBalance walletId={session.id} routeReady={routeReady && engineReady} refreshKey={privateBalanceRefresh} onSpendable={observeSpendable} />}
       {session.backupConfirmed && <details className="receive-details"><summary>Receive private funds <span>0zk address</span></summary><p>Share this address to receive shielded funds from another RAILGUN wallet.</p><code>{session.railgunAddress}</code><button type="button" onClick={() => void copyAddress(session.railgunAddress)}>{copiedAddress === `${copyPrefix}${session.railgunAddress}` ? 'Copied' : 'Copy private address'}</button></details>}
       {session.backupConfirmed && !recoveryPhrase && hasGas && spendable !== undefined && spendable > 0n && routeReady && engineReady && <SendPanel key={`send:${session.id}`}
@@ -260,13 +287,13 @@ export function WalletPanel({ routeVersion = 0, blockNumber, engineReady, shield
       }} />}
     </> : <>
       <p className="wallet-setup-copy">{mode === 'unlock' ? 'Unlock the wallet saved in this browser.' : mode === 'import' ? 'Restore with your recovery words and set a password for this device.' : 'Choose a password to encrypt your wallet on this device.'}</p>
-      {!hasStoredVault() && <div className="wallet-tabs"><button type="button" aria-pressed={mode === 'create'} onClick={() => setMode('create')}>Create wallet</button><button type="button" aria-pressed={mode === 'import'} onClick={() => setMode('import')}>Import wallet</button></div>}
-      <form onSubmit={submit} className="wallet-form">
-        {mode === 'import' && <label>Recovery phrase<textarea value={phrase} onChange={(event) => setPhrase(event.target.value)} autoComplete="off" spellCheck={false} required placeholder="Enter your 12 or 24 words" /></label>}
-        <label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'unlock' ? 'current-password' : 'new-password'} minLength={12} required placeholder="At least 12 characters" /></label>
+      {!hasStoredVault() && <div className="wallet-tabs" role="radiogroup" aria-label="Wallet setup" onKeyDown={setupNavigation}>{(['create', 'import'] as const).map(option => <button key={option} type="button" role="radio" data-setup-mode={option} aria-checked={mode === option} tabIndex={mode === option ? 0 : -1} aria-controls="wallet-setup-form" disabled={busy} onClick={() => chooseSetup(option)} style={{ fontSize: 14, ...(mode === option ? { borderColor: '#be9e82', background: '#f7e8dc', color: '#763b1e' } : {}) }}>{option === 'create' ? 'Create wallet' : 'Import wallet'}</button>)}</div>}
+      <form id="wallet-setup-form" onSubmit={submit} className="wallet-form">
+        {mode === 'import' && <div><label htmlFor="wallet-import-phrase" style={{ fontSize: 14 }}>Recovery phrase<textarea id="wallet-import-phrase" value={phrase} disabled={busy} onChange={(event) => setPhrase(event.target.value)} autoComplete="off" spellCheck={false} autoCapitalize="none" required placeholder="Enter your 12 or 24 words" aria-describedby="wallet-import-visibility" /></label><p id="wallet-import-visibility" className="wallet-setup-footnote" style={{ fontSize: 13, lineHeight: 1.6 }}>Recovery words are visible in this field. Stop screen sharing before entering them.</p></div>}
+        <div><label htmlFor="wallet-local-password" style={{ fontSize: 14 }}>Password</label><div style={{ display: 'flex', gap: 8, alignItems: 'stretch', marginTop: 9 }}><input id="wallet-local-password" type={showPassword ? 'text' : 'password'} value={password} disabled={busy} onChange={(event) => setPassword(event.target.value)} autoComplete={mode === 'unlock' ? 'current-password' : 'new-password'} minLength={12} required aria-describedby="wallet-password-requirements" style={{ minWidth: 0, flex: 1 }} /><button type="button" disabled={busy} aria-label={showPassword ? 'Hide password' : 'Show password'} aria-pressed={showPassword} aria-controls="wallet-local-password" onClick={() => setShowPassword(value => !value)}>{showPassword ? 'Hide' : 'Show'}</button></div><p id="wallet-password-requirements" className="wallet-setup-footnote" style={{ fontSize: 13, lineHeight: 1.6 }}>Use at least 12 characters. This password unlocks the encrypted wallet on this device.</p></div>
         <button className="primary" type="submit" disabled={!engineReady || !routeReady || busy}>{busy ? 'Opening wallet…' : mode === 'create' ? 'Create wallet' : mode === 'import' ? 'Restore wallet' : 'Unlock wallet'}</button>
       </form>
-      {connectionFailed ? <div className="wallet-setup-connection wallet-error" role="alert">Private connection failed. <button type="button" onClick={onRetry}>Reconnect</button></div> : !engineReady && <small className="wallet-setup-connection" role="status">{routeReady ? 'Preparing your wallet…' : 'Connecting your private route…'}</small>}
+      {connectionNotice}
       <p className="wallet-setup-footnote">Ethereum Sepolia · Test ETH only</p>
     </>}
     {error && <p className="wallet-error" role="alert">{error}</p>}
