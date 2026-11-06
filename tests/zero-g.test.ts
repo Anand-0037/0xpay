@@ -19,10 +19,14 @@ test('two genuine-shaped role calls pin private tier and return only observed id
   const mock: typeof fetch = async (url, init) => {
     calls++
     assert.equal(String(url), ZERO_G_ENDPOINT)
-    assert.deepEqual(init?.headers, { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', 'X-0G-Provider-Trust-Mode': 'private' })
+    assert.deepEqual(init?.headers, { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json',
+      'X-0G-Provider-Trust-Mode': 'private', 'X-0G-Provider-Allow-Fallbacks': 'false' })
     assert.equal(init?.credentials, 'omit'); assert.equal(init?.redirect, 'error'); assert.equal(init?.cache, 'no-store')
     const body = JSON.parse(String(init?.body))
     assert.equal(body.model, ZERO_G_MODEL); assert.equal(body.verify_tee, true); assert.equal(body.max_tokens, 700); assert.equal(body.stream, false)
+    assert.deepEqual(body.response_format, { type: 'json_object' })
+    assert.deepEqual(body.chat_template_kwargs, { enable_thinking: false })
+    assert.deepEqual(Object.keys(body).sort(), ['model', 'messages', 'stream', 'max_tokens', 'verify_tee', 'response_format', 'chat_template_kwargs'].sort())
     assert.equal(body.messages.length, 2)
     const data = JSON.parse(body.messages[1].content)
     assert.equal(data.evidence.market.marketId, '123')
@@ -42,6 +46,25 @@ test('missing configuration and empty sources never call the network', async () 
   await assert.rejects(runZeroGResearch({ ...input(), sources: [] }, { apiKey }, never), errorCode('NO_SOURCES'))
   await assert.rejects(runZeroGResearch(input(), { apiKey, model: 'other' }, never), errorCode('NOT_CONFIGURED'))
   await assert.rejects(runZeroGResearch(input(), { apiKey, timeoutMs: 120001 }, never), errorCode('NOT_CONFIGURED'))
+})
+
+test('JSON request settings never make malformed content or tool actions acceptable', async () => {
+  const messages = [
+    { role: 'assistant', content: `\`\`\`json\n${JSON.stringify(research())}\n\`\`\`` },
+    { role: 'assistant', content: `<think>synthetic reasoning</think>${JSON.stringify(research())}` },
+    { role: 'assistant', content: JSON.stringify(research()), tool_calls: [{ id: 'fixture-tool', type: 'function', function: { name: 'place_order', arguments: '{}' } }] },
+  ]
+  for (const message of messages) {
+    let calls = 0
+    await assert.rejects(runZeroGResearch(input(), { apiKey }, async (_url, init) => {
+      calls++
+      const request = JSON.parse(String(init?.body))
+      assert.deepEqual(request.response_format, { type: 'json_object' })
+      assert.deepEqual(request.chat_template_kwargs, { enable_thinking: false })
+      return response(research(), { choices: [{ message, finish_reason: 'stop' }] })
+    }), errorCode('INVALID_RESPONSE'))
+    assert.equal(calls, 1, 'invalid researcher output must not start the skeptic')
+  }
 })
 
 test('strict public input rejects account fields, addresses, private keys and actual mnemonic phrases', () => {
@@ -90,11 +113,51 @@ test('private-tier provider failures do not downgrade, retry or echo error bodie
   let calls = 0
   const mock: typeof fetch = async () => { calls++; return Response.json({ error: `no_provider_for_trust_mode ${apiKey}` }, { status: 503 }) }
   await assert.rejects(runZeroGResearch(input(), { apiKey }, mock), (error: unknown) => {
-    assert.ok(error instanceof ZeroGError); assert.equal(error.code, 'PROVIDER_ERROR'); assert.equal(error.status, 503)
+    assert.ok(error instanceof ZeroGError); assert.equal(error.code, 'PROVIDER_CAPACITY'); assert.equal(error.status, 503)
+    assert.deepEqual(error.diagnostics, { providerStatus: 503, requestId: null })
     assert.equal(error.message.includes(apiKey), false); return true
   })
   assert.equal(calls, 1)
   await assert.rejects(runZeroGResearch(input(), { apiKey }, async () => { throw new Error(`fetch ${apiKey}`) }), (error: unknown) => error instanceof ZeroGError && !error.message.includes(apiKey))
+})
+
+test('provider HTTP diagnostics distinguish finite failures without reading or echoing raw bodies', async () => {
+  for (const [status, code] of [[401, 'PROVIDER_AUTH'], [403, 'PROVIDER_AUTH'], [402, 'PROVIDER_CREDIT'],
+    [429, 'PROVIDER_RATE_LIMIT'], [500, 'PROVIDER_CAPACITY'], [503, 'PROVIDER_CAPACITY'], [400, 'PROVIDER_REQUEST']] as const) {
+    let calls = 0
+    await assert.rejects(runZeroGResearch(input(), { apiKey }, async () => {
+      calls++
+      return Response.json({ error: `${apiKey} PRIVATE_PROMPT_SENTINEL` }, { status, headers: { 'x-request-id': `request-${status}` } })
+    }), error => {
+      assert.ok(error instanceof ZeroGError)
+      assert.equal(error.code, code)
+      assert.deepEqual(error.diagnostics, { providerStatus: status, requestId: `request-${status}` })
+      assert.doesNotMatch(JSON.stringify(error), /PRIVATE_PROMPT_SENTINEL|sk-synthetic/)
+      assert.equal(error.message.includes(apiKey), false)
+      return true
+    })
+    assert.equal(calls, 1, 'no retry, downgrade or skeptic call after failure')
+  }
+})
+
+test('network and invalid-response diagnostics retain only observed status and safe request identifiers', async () => {
+  await assert.rejects(runZeroGResearch(input(), { apiKey }, async () => { throw new TypeError(`PRIVATE_PROMPT_SENTINEL ${apiKey}`) }), error => {
+    assert.ok(error instanceof ZeroGError); assert.equal(error.code, 'PROVIDER_NETWORK')
+    assert.deepEqual(error.diagnostics, { providerStatus: null, requestId: null })
+    assert.doesNotMatch(error.message, /PRIVATE_PROMPT_SENTINEL|sk-synthetic/)
+    return true
+  })
+  await assert.rejects(runZeroGResearch(input(), { apiKey }, async () => response({ ...research(), citations: ['invented'] }, {}, { 'x-request-id': 'request-schema' })), error => {
+    assert.ok(error instanceof ZeroGError); assert.equal(error.code, 'INVALID_RESPONSE')
+    assert.deepEqual(error.diagnostics, { providerStatus: 200, requestId: 'request-schema' })
+    return true
+  })
+  for (const unsafe of [apiKey, 'request@example.org', 'x'.repeat(129), `0x${'11'.repeat(20)}`]) {
+    await assert.rejects(runZeroGResearch(input(), { apiKey }, async () => Response.json({ error: apiKey }, { status: 401, headers: { 'x-request-id': unsafe } })), error => {
+      assert.ok(error instanceof ZeroGError); assert.deepEqual(error.diagnostics, { providerStatus: 401, requestId: null })
+      return true
+    })
+  }
 })
 
 test('bounded timeout works even when injected fetch ignores abort and no second request runs', async () => {

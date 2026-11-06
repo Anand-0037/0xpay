@@ -25,8 +25,13 @@ const DEFAULT_TIMEOUT_MS = 180_000
 export class ResearchRequestError extends Error {
   readonly code: 'invalid-input' | 'unavailable' | 'rejected' | 'invalid-response' | 'timeout' | 'aborted' | 'network'
   readonly status: number | null
-  constructor(message: string, code: ResearchRequestError['code'], status: number | null = null) {
+  readonly backendCode: string | null
+  readonly providerStatus: number | null
+  readonly requestId: string | null
+  constructor(message: string, code: ResearchRequestError['code'], status: number | null = null,
+    details?: { backendCode: string; providerStatus: number | null; requestId: string | null }) {
     super(message); this.name = 'ResearchRequestError'; this.code = code; this.status = status
+    this.backendCode = details?.backendCode ?? null; this.providerStatus = details?.providerStatus ?? null; this.requestId = details?.requestId ?? null
   }
 }
 
@@ -125,9 +130,9 @@ function resultFrom(value: unknown, sourceIds: Set<string>): PublicResearchResul
   }
 }
 
-async function responseBody(response: Response, signal: AbortSignal) {
+async function responseBody(response: Response, signal: AbortSignal, maxBytes = MAX_RESPONSE_BYTES) {
   const length = response.headers.get('content-length')
-  if (length && (!/^\d+$/.test(length) || BigInt(length) > BigInt(MAX_RESPONSE_BYTES))) {
+  if (length && (!/^\d+$/.test(length) || BigInt(length) > BigInt(maxBytes))) {
     void response.body?.cancel().catch(() => {})
     throw new Error('Research response is too large.')
   }
@@ -143,11 +148,50 @@ async function responseBody(response: Response, signal: AbortSignal) {
       signal.throwIfAborted()
       if (chunk.done) break
       bytes += chunk.value.byteLength
-      if (bytes > MAX_RESPONSE_BYTES) throw new Error('Research response is too large.')
+      if (bytes > maxBytes) throw new Error('Research response is too large.')
       output += decoder.decode(chunk.value, { stream: true })
     }
     return output + decoder.decode()
   } finally { signal.removeEventListener('abort', abort); void reader.cancel().catch(() => {}); reader.releaseLock() }
+}
+
+const FAILURE_MESSAGES: Readonly<Record<string, string>> = {
+  NOT_CONFIGURED: '0G research is not configured on this server.',
+  PROVIDER_AUTH: '0G rejected the server credential or access permissions.',
+  PROVIDER_CREDIT: '0G reported that inference credit is required.',
+  PROVIDER_RATE_LIMIT: '0G rate-limited this private research request.',
+  PROVIDER_CAPACITY: 'The private 0G provider could not serve this request.',
+  PROVIDER_REQUEST: '0G rejected the configured model request.',
+  PROVIDER_NETWORK: 'The private 0G provider was unreachable or its response was interrupted.',
+  PROVIDER_ERROR: 'Private-tier 0G research is unavailable.',
+  INVALID_RESPONSE: '0G returned a response that failed schema or verification checks.',
+  TIMEOUT: '0G research timed out.', ABORTED: 'Research was cancelled.',
+  BUSY: 'Another research request is already running.',
+  RATE_LIMITED: 'The local research service rate limit was reached.',
+  JOB_LIMIT_REACHED: 'The local research job allowance was reached.',
+}
+async function failureFrom(response: Response, signal: AbortSignal): Promise<ResearchRequestError> {
+  // Never render a provider/server message. Only finite codes and independently
+  // checked status/opaque request IDs may be used as a diagnostic.
+  try {
+    if (!response.redirected && response.headers.get('content-type')?.toLowerCase().includes('application/json')) {
+      const body = object(JSON.parse(await abortable(responseBody(response, signal, 8192), signal)))
+      const failure = object(body.error)
+      if (typeof failure.code === 'string' && Object.hasOwn(FAILURE_MESSAGES, failure.code)) {
+        const diagnostics = failure.diagnostics === undefined ? {} : object(failure.diagnostics)
+        const providerStatus = typeof diagnostics.providerStatus === 'number' && Number.isInteger(diagnostics.providerStatus) &&
+          diagnostics.providerStatus >= 100 && diagnostics.providerStatus <= 599 ? diagnostics.providerStatus : null
+        const requestId = typeof diagnostics.requestId === 'string' && /^[a-z0-9._:-]{1,128}$/i.test(diagnostics.requestId) &&
+          !containsSensitiveResearchText(diagnostics.requestId) ? diagnostics.requestId : null
+        const detail = `${providerStatus === null ? '' : ` Provider HTTP ${providerStatus}.`}${requestId === null ? '' : ` Request ${requestId}.`}`
+        return new ResearchRequestError(`${FAILURE_MESSAGES[failure.code]}${detail} No model result was returned.`,
+          failure.code === 'INVALID_RESPONSE' ? 'invalid-response' : 'unavailable', response.status,
+          { backendCode: failure.code, providerStatus, requestId })
+      }
+    } else void response.body?.cancel().catch(() => {})
+  } catch (cause) { if (signal.aborted) throw cause }
+  return new ResearchRequestError(response.status === 503 ? '0G research is unavailable. No model result was returned.' :
+    'The research request was rejected. No model result was returned.', response.status === 503 ? 'unavailable' : 'rejected', response.status)
 }
 
 function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -183,9 +227,7 @@ export async function requestPublicResearch(market: PublicResearchMarket, source
     }), controller.signal)
     controller.signal.throwIfAborted()
     if (!response.ok) {
-      void response.body?.cancel().catch(() => {})
-      if (response.status === 503) throw new ResearchRequestError('0G research is unavailable or not configured. No model result was returned.', 'unavailable', 503)
-      throw new ResearchRequestError('The research request was rejected. No model result was returned.', 'rejected', response.status)
+      throw await failureFrom(response, controller.signal)
     }
     if (response.redirected || !response.headers.get('content-type')?.toLowerCase().includes('application/json')) {
       void response.body?.cancel().catch(() => {})

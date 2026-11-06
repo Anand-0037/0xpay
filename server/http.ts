@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { readFile, realpath } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
-import { runZeroGResearch, validatePublicResearchInput, ZeroGError, type ZeroGConfig, type ZeroGErrorCode } from './zero-g.ts'
+import { runZeroGResearch, safeZeroGDiagnostics, validatePublicResearchInput, ZeroGError, type ZeroGConfig, type ZeroGErrorCode } from './zero-g.ts'
 
 export type ResearchServerOptions = {
   config?: ZeroGConfig
@@ -43,6 +43,12 @@ const safeErrors: Record<ZeroGErrorCode, { status: number; message: string }> = 
   NO_SOURCES: { status: 400, message: 'Retrieve public evidence before requesting research.' },
   INVALID_INPUT: { status: 400, message: 'Only bounded public market evidence is accepted.' },
   PROVIDER_ERROR: { status: 503, message: 'Private-tier 0G research is unavailable. No fallback was used.' },
+  PROVIDER_AUTH: { status: 502, message: '0G rejected authentication or access permissions. No fallback was used.' },
+  PROVIDER_CREDIT: { status: 402, message: '0G requires available inference credit. No fallback was used.' },
+  PROVIDER_RATE_LIMIT: { status: 429, message: '0G rate-limited this private request. No automatic retry was made.' },
+  PROVIDER_CAPACITY: { status: 503, message: 'The private 0G provider could not serve this request. No fallback was used.' },
+  PROVIDER_REQUEST: { status: 502, message: '0G rejected the configured model request. No fallback was used.' },
+  PROVIDER_NETWORK: { status: 502, message: 'The private 0G provider was unreachable or its response was interrupted.' },
   TIMEOUT: { status: 504, message: '0G research timed out.' },
   ABORTED: { status: 408, message: 'Research was cancelled.' },
   INVALID_RESPONSE: { status: 502, message: '0G returned an invalid research response.' },
@@ -106,7 +112,8 @@ export function createResearchServer(options: ResearchServerOptions = {}) {
         if (!controller.signal.aborted && !response.writableEnded) {
           if (error instanceof ZeroGError && Object.hasOwn(safeErrors, error.code)) {
             const safe = safeErrors[error.code]
-            failure(response, safe.status, error.code, safe.message)
+            json(response, safe.status, { error: { code: error.code, message: safe.message,
+              diagnostics: safeZeroGDiagnostics(error.diagnostics, config.apiKey) } })
           }
           else if (error instanceof Error && error.message === 'BODY_TOO_LARGE') failure(response, 413, 'BODY_TOO_LARGE', 'The research request is too large.')
           else if (error instanceof SyntaxError) failure(response, 400, 'INVALID_JSON', 'The research request must be valid JSON.')

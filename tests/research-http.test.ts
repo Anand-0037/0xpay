@@ -96,6 +96,29 @@ test('untrusted errors and even forged ZeroGError messages never escape', async 
   }
 })
 
+test('HTTP diagnostics use fixed error messages/statuses and revalidate provider metadata', async () => {
+  for (const [code, upstream, status] of [['PROVIDER_AUTH', 401, 502], ['PROVIDER_CREDIT', 402, 402],
+    ['PROVIDER_RATE_LIMIT', 429, 429], ['PROVIDER_CAPACITY', 503, 503], ['PROVIDER_REQUEST', 400, 502],
+    ['PROVIDER_NETWORK', null, 502], ['INVALID_RESPONSE', 200, 502]] as const) {
+    await withServer({ research: async () => { throw new ZeroGError(code, `${key} PRIVATE_PROMPT_SENTINEL`, 201,
+      { providerStatus: upstream, requestId: 'request-public-fixture' }) } }, async base => {
+      const response = await post(base), body = await response.json()
+      assert.equal(response.status, status)
+      assert.equal(body.error.code, code)
+      assert.deepEqual(body.error.diagnostics, { providerStatus: upstream, requestId: 'request-public-fixture' })
+      assert.equal(JSON.stringify(body).includes(key), false)
+      assert.doesNotMatch(JSON.stringify(body), /PRIVATE_PROMPT_SENTINEL/)
+    })
+  }
+  await withServer({ research: async () => { throw new ZeroGError('PROVIDER_AUTH', key, 201,
+    { providerStatus: 999, requestId: key, privateKey: key }) } }, async base => {
+    const response = await post(base), body = await response.json()
+    assert.equal(response.status, 502)
+    assert.deepEqual(body.error.diagnostics, { providerStatus: null, requestId: null })
+    assert.equal(JSON.stringify(body).includes(key), false)
+  })
+})
+
 test('one concurrent job, per-minute bounds and global process allowance prevent repeated credit use', async () => {
   let calls = 0; let release: (() => void) | undefined
   let entered!: () => void

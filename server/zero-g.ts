@@ -8,12 +8,24 @@ export interface PublicResearchInput {
   sources: PublicResearchSource[]
 }
 export interface ZeroGConfig { apiKey?: string; model?: string; timeoutMs?: number }
-export type ZeroGErrorCode = 'NOT_CONFIGURED' | 'NO_SOURCES' | 'INVALID_INPUT' | 'PROVIDER_ERROR' | 'TIMEOUT' | 'ABORTED' | 'INVALID_RESPONSE'
+export type ZeroGErrorCode = 'NOT_CONFIGURED' | 'NO_SOURCES' | 'INVALID_INPUT' | 'PROVIDER_ERROR' | 'PROVIDER_AUTH' | 'PROVIDER_CREDIT' | 'PROVIDER_RATE_LIMIT' | 'PROVIDER_CAPACITY' | 'PROVIDER_REQUEST' | 'PROVIDER_NETWORK' | 'TIMEOUT' | 'ABORTED' | 'INVALID_RESPONSE'
+export type ZeroGDiagnostics = Readonly<{ providerStatus: number | null; requestId: string | null }>
+/** Only status and a bounded opaque header identifier may leave the backend. */
+export function safeZeroGDiagnostics(value: unknown, apiKey?: string): ZeroGDiagnostics {
+  const input = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const providerStatus = typeof input.providerStatus === 'number' && Number.isInteger(input.providerStatus) &&
+    input.providerStatus >= 100 && input.providerStatus <= 599 ? input.providerStatus : null
+  const requestId = typeof input.requestId === 'string' && /^[a-z0-9._:-]{1,128}$/i.test(input.requestId) &&
+    !containsSensitiveResearchText(input.requestId) && (!apiKey || !input.requestId.includes(apiKey)) ? input.requestId : null
+  return { providerStatus, requestId }
+}
 export class ZeroGError extends Error {
   readonly code: ZeroGErrorCode
   readonly status: number
-  constructor(code: ZeroGErrorCode, message: string, status: number) {
+  readonly diagnostics: ZeroGDiagnostics
+  constructor(code: ZeroGErrorCode, message: string, status: number, diagnostics?: unknown) {
     super(message); this.name = 'ZeroGError'; this.code = code; this.status = status
+    this.diagnostics = safeZeroGDiagnostics(diagnostics)
   }
 }
 export interface ResearcherResult {
@@ -32,7 +44,16 @@ export interface ZeroGResearchResult {
 }
 
 const invalid = () => new ZeroGError('INVALID_INPUT', 'Only bounded public market evidence is accepted.', 400)
-const malformed = () => new ZeroGError('INVALID_RESPONSE', '0G returned an invalid research response.', 502)
+const malformed = (diagnostics?: ZeroGDiagnostics) => new ZeroGError('INVALID_RESPONSE', '0G returned an invalid research response.', 502, diagnostics)
+function providerFailure(status: number, diagnostics: ZeroGDiagnostics): ZeroGError {
+  // Classify the observed HTTP status only; never guess the reason from raw
+  // provider text. A 5xx identifies unavailability, not proven capacity loss.
+  if (status === 401 || status === 403) return new ZeroGError('PROVIDER_AUTH', '0G rejected authentication or access permissions.', 502, diagnostics)
+  if (status === 402) return new ZeroGError('PROVIDER_CREDIT', '0G requires available inference credit.', 402, diagnostics)
+  if (status === 429) return new ZeroGError('PROVIDER_RATE_LIMIT', '0G rate-limited the private research request.', 429, diagnostics)
+  if (status >= 500) return new ZeroGError('PROVIDER_CAPACITY', 'The private 0G provider could not serve this request.', 503, diagnostics)
+  return new ZeroGError('PROVIDER_REQUEST', '0G rejected the configured research request.', 502, diagnostics)
+}
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid()
   const prototype = Object.getPrototypeOf(value)
@@ -146,11 +167,13 @@ export async function runZeroGResearch(input: unknown, config: ZeroGConfig = {},
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) throw new ZeroGError('NOT_CONFIGURED', 'The configured 0G timeout is invalid.', 503)
   const allowed = new Set(evidence.sources.map(source => source.id))
   const receipts: ZeroGReceipt[] = []
+  let lastDiagnostics: ZeroGDiagnostics = { providerStatus: null, requestId: null }
   const call = async (role: 'researcher' | 'skeptic', research?: ResearcherResult): Promise<unknown> => {
     if (signal?.aborted) throw new ZeroGError('ABORTED', 'Research was cancelled.', 408)
     const controller = new AbortController()
     let timer: ReturnType<typeof setTimeout> | undefined
     let onAbort: (() => void) | undefined
+    let diagnostics: ZeroGDiagnostics = { providerStatus: null, requestId: null }
     const interrupted = new Promise<never>((_, reject) => {
       timer = setTimeout(() => { controller.abort(); reject(new ZeroGError('TIMEOUT', '0G research timed out.', 504)) }, timeoutMs)
       onAbort = () => { controller.abort(); reject(new ZeroGError('ABORTED', 'Research was cancelled.', 408)) }
@@ -162,12 +185,21 @@ export async function runZeroGResearch(input: unknown, config: ZeroGConfig = {},
         // verify_tee. The Router checks the signature; this is not our own TEE
         // attestation verification. No downgrade, retry or alternate provider.
         // https://0g.ai/blog/data-privacy-on-0g-private-computer
+        // Explicitly disable Router-side failover; JSON mode and non-thinking
+        // output suit this bounded structured-result pipeline. These request
+        // settings do not repair an unavailable provider.
+        // https://docs.0g.ai/developer-hub/building-on-0g/compute-network/router/routing
+        // https://docs.0g.ai/developer-hub/building-on-0g/compute-network/router/features/chat-completions
+        // https://0g.ai/blog/0gm-1-0-35b-a3b
         const response = await fetcher(ZERO_G_ENDPOINT, {
-          method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', 'X-0G-Provider-Trust-Mode': 'private' },
-          body: JSON.stringify({ model: ZERO_G_MODEL, messages: [{ role: 'system', content: instructions[role] }, { role: 'user', content: JSON.stringify({ evidence, ...(research ? { researcher: research } : {}) }) }], stream: false, max_tokens: 700, verify_tee: true }),
+          method: 'POST', headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', 'X-0G-Provider-Trust-Mode': 'private', 'X-0G-Provider-Allow-Fallbacks': 'false' },
+          body: JSON.stringify({ model: ZERO_G_MODEL, messages: [{ role: 'system', content: instructions[role] }, { role: 'user', content: JSON.stringify({ evidence, ...(research ? { researcher: research } : {}) }) }],
+            stream: false, max_tokens: 700, verify_tee: true, response_format: { type: 'json_object' }, chat_template_kwargs: { enable_thinking: false } }),
           signal: controller.signal, redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store'
         })
-        if (!response.ok) { void response.body?.cancel().catch(() => {}); throw new ZeroGError('PROVIDER_ERROR', 'Private-tier 0G research is unavailable. No fallback was used.', 503) }
+        diagnostics = safeZeroGDiagnostics({ providerStatus: response.status, requestId: response.headers.get('x-request-id') }, apiKey)
+        lastDiagnostics = diagnostics
+        if (!response.ok) { void response.body?.cancel().catch(() => {}); throw providerFailure(response.status, diagnostics) }
         const body = object(await readJson(response))
         const trace = body.x_0g_trace === undefined ? {} : object(body.x_0g_trace)
         const verified = trace.tee_verified === undefined ? null : trace.tee_verified
@@ -184,10 +216,14 @@ export async function runZeroGResearch(input: unknown, config: ZeroGConfig = {},
       })()
       return await Promise.race([task, interrupted])
     } catch (error) {
-      if (error instanceof ZeroGError) throw error
+      if (error instanceof ZeroGError) {
+        if (error.code === 'INVALID_INPUT') throw malformed(diagnostics)
+        throw new ZeroGError(error.code, error.message, error.status,
+          error.diagnostics.providerStatus === null ? diagnostics : safeZeroGDiagnostics(error.diagnostics, apiKey))
+      }
       // Provider/fetch/parser exceptions can contain input or headers: never
       // forward their message, raw response, stack or cause to the client.
-      throw new ZeroGError('PROVIDER_ERROR', 'Private-tier 0G research failed. No fallback was used.', 503)
+      throw new ZeroGError('PROVIDER_NETWORK', 'The private 0G provider could not be reached or its response was interrupted.', 502, diagnostics)
     } finally {
       clearTimeout(timer)
       if (onAbort) signal?.removeEventListener('abort', onAbort)
@@ -196,8 +232,8 @@ export async function runZeroGResearch(input: unknown, config: ZeroGConfig = {},
   let researcher: ResearcherResult
   let skeptic: SkepticResult
   try { researcher = researcherResult(await call('researcher'), allowed, apiKey) }
-  catch (error) { if (error instanceof ZeroGError && error.code !== 'INVALID_INPUT') throw error; throw malformed() }
+  catch (error) { if (error instanceof ZeroGError && error.code !== 'INVALID_INPUT' && error.code !== 'INVALID_RESPONSE') throw error; throw malformed(lastDiagnostics) }
   try { skeptic = skepticResult(await call('skeptic', researcher), allowed, apiKey) }
-  catch (error) { if (error instanceof ZeroGError && error.code !== 'INVALID_INPUT') throw error; throw malformed() }
+  catch (error) { if (error instanceof ZeroGError && error.code !== 'INVALID_INPUT' && error.code !== 'INVALID_RESPONSE') throw error; throw malformed(lastDiagnostics) }
   return { mode: '0g-private-research', model: ZERO_G_MODEL, researcher, skeptic, receipts, privacy: { providerTrustMode: 'private', proxySeesPlaintext: true } }
 }

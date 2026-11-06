@@ -58,6 +58,49 @@ test('configuration 503 is surfaced without a fabricated model result or raw bac
   assert.equal(calls, 1, 'no alternative inference endpoint is attempted')
 })
 
+test('client distinguishes safe provider diagnostics from missing local configuration without rendering backend messages', async () => {
+  for (const [code, status, phrase] of [['PROVIDER_AUTH', 401, /credential or access/],
+    ['PROVIDER_CREDIT', 402, /credit is required/], ['PROVIDER_RATE_LIMIT', 429, /rate-limited/],
+    ['PROVIDER_CAPACITY', 503, /could not serve/], ['PROVIDER_REQUEST', 400, /model request/],
+    ['PROVIDER_NETWORK', null, /unreachable/], ['INVALID_RESPONSE', 200, /schema or verification/]] as const) {
+    let calls = 0
+    await assert.rejects(requestPublicResearch(market, [source], { fetcher: async () => {
+      calls++
+      return Response.json({ error: { code, message: 'PRIVATE_BACKEND_SENTINEL', diagnostics: { providerStatus: status, requestId: 'request-safe' } } }, { status: 503 })
+    } }), error => {
+      assert.ok(error instanceof ResearchRequestError)
+      assert.equal(error.backendCode, code); assert.equal(error.providerStatus, status); assert.equal(error.requestId, 'request-safe')
+      assert.match(error.message, phrase); assert.match(error.message, /Request request-safe/)
+      if (status !== null) assert.match(error.message, new RegExp(`Provider HTTP ${status}`))
+      assert.doesNotMatch(error.message, /PRIVATE_BACKEND_SENTINEL|not configured/)
+      return true
+    })
+    assert.equal(calls, 1)
+  }
+})
+
+test('client never displays invalid diagnostic identifiers, unknown codes or oversized error bodies', async () => {
+  for (const diagnostics of [{ providerStatus: 999, requestId: 'sk-synthetic-secret-value' },
+    { providerStatus: 401, requestId: `0x${'11'.repeat(20)}` }, { providerStatus: '401', requestId: 'request@example.org' }]) {
+    await assert.rejects(requestPublicResearch(market, [source], { fetcher: async () => Response.json({
+      error: { code: 'PROVIDER_AUTH', message: 'PRIVATE_BACKEND_SENTINEL', diagnostics },
+    }, { status: 502 }) }), error => {
+      assert.ok(error instanceof ResearchRequestError)
+      assert.equal(error.requestId, null)
+      assert.doesNotMatch(error.message, /sk-synthetic|0x111|request@example|PRIVATE_BACKEND_SENTINEL|999/)
+      return true
+    })
+  }
+  for (const body of [{ error: { code: 'PRIVATE_UNKNOWN_CODE', message: 'PRIVATE_BACKEND_SENTINEL' } },
+    { error: { code: 'PROVIDER_AUTH', message: 'PRIVATE_BACKEND_SENTINEL'.repeat(1000) } }]) {
+    await assert.rejects(requestPublicResearch(market, [source], { fetcher: async () => Response.json(body, { status: 503 }) }), error => {
+      assert.ok(error instanceof ResearchRequestError)
+      assert.equal(error.backendCode, null); assert.doesNotMatch(error.message, /PRIVATE_/)
+      return true
+    })
+  }
+})
+
 for (const [label, mutate] of [
   ['unknown citation', (body: PublicResearchResult) => { body.researcher.citations = ['S2'] }],
   ['duplicate receipt role', (body: PublicResearchResult) => { (body.receipts as unknown[])[1] = body.receipts[0] }],
