@@ -1,6 +1,6 @@
 import { HDNodeWallet, Mnemonic, randomBytes } from 'ethers'
-import { openVault, sealMnemonic, type StoredVault } from './vault'
-import { SessionGate } from './session'
+import { openVault, sealMnemonic, type StoredVault } from './vault.ts'
+import { SessionGate } from './session.ts'
 
 export type WalletSession = { id: string; railgunAddress: string; publicAddress: string }
 const STORAGE_KEY = '0xpay.vault.v1'
@@ -9,10 +9,23 @@ let loadedWalletId: string | null = null
 let unlockedSdkKey: string | null = null
 const sessionGate = new SessionGate()
 
-export function hasStoredVault() { return localStorage.getItem(STORAGE_KEY) !== null }
+export function hasStoredVault() {
+  try { return localStorage.getItem(STORAGE_KEY) !== null }
+  catch { return false }
+}
+
+function assertWritableStorage() {
+  const probe = `0xpay.storage-check.${crypto.randomUUID()}`
+  try {
+    localStorage.setItem(probe, '1')
+    localStorage.removeItem(probe)
+  } catch { throw new Error('Browser storage is unavailable. Enable site storage before setting up a wallet.') }
+}
 
 export function storedVault(): StoredVault | null {
-  const saved = localStorage.getItem(STORAGE_KEY)
+  let saved: string | null
+  try { saved = localStorage.getItem(STORAGE_KEY) }
+  catch { throw new Error('Browser storage is unavailable. Enable site storage to unlock this wallet.') }
   if (!saved) return null
   let value: unknown
   try { value = JSON.parse(saved) } catch { throw new Error('Local wallet record is damaged') }
@@ -64,6 +77,7 @@ async function unlockRecord(vault: StoredVault, password: string, generation: nu
 }
 
 export async function createLocalWallet(password: string, blockNumber: number) {
+  assertWritableStorage()
   if (hasStoredVault()) throw new Error('A local wallet already exists; unlock it instead')
   const generation = sessionGate.beginUnlock()
   try {
@@ -72,12 +86,17 @@ export async function createLocalWallet(password: string, blockNumber: number) {
     sessionGate.assertCurrent(generation)
     const session = await unlockRecord(vault, password, generation)
     sessionGate.assertCurrent(generation)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(vault))
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(vault)) }
+    catch {
+      try { await lockLocalWallet() } catch { /* never expose an unsaved wallet session */ }
+      throw new Error('Browser storage could not save this wallet. No wallet was set up; enable site storage and retry.')
+    }
     return { session, recoveryPhrase: mnemonic }
   } finally { sessionGate.finishUnlock() }
 }
 
 export async function importLocalWallet(phrase: string, password: string) {
+  assertWritableStorage()
   if (hasStoredVault()) throw new Error('A local wallet already exists; unlock it instead')
   const generation = sessionGate.beginUnlock()
   try {
@@ -89,7 +108,11 @@ export async function importLocalWallet(phrase: string, password: string) {
     sessionGate.assertCurrent(generation)
     const session = await unlockRecord(vault, password, generation)
     sessionGate.assertCurrent(generation)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(vault))
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(vault)) }
+    catch {
+      try { await lockLocalWallet() } catch { /* never expose an unsaved wallet session */ }
+      throw new Error('Browser storage could not save this wallet. No wallet was set up; enable site storage and retry.')
+    }
     return session
   } finally { sessionGate.finishUnlock() }
 }
