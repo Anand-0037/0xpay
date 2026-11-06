@@ -12,6 +12,8 @@ export class SessionGate {
 
   isCurrent(generation: number) { return generation === this.generation }
 
+  get version() { return this.generation }
+
   assertCurrent(generation: number) {
     if (!this.isCurrent(generation)) throw new Error('Wallet was locked during unlock')
   }

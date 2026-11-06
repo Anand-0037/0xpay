@@ -5,6 +5,7 @@ export type StoredVault = {
   ciphertext: string
   walletId?: string
   creationBlock: number
+  backupConfirmed?: boolean
 }
 
 const ITERATIONS = 310_000
@@ -39,7 +40,7 @@ export async function sealMnemonic(mnemonic: string, password: string, creationB
   const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv: nonce }, key, new TextEncoder().encode(mnemonic),
   ))
-  return { version: 1, salt: encode(salt), nonce: encode(nonce), ciphertext: encode(ciphertext), creationBlock }
+  return { version: 1, salt: encode(salt), nonce: encode(nonce), ciphertext: encode(ciphertext), creationBlock, backupConfirmed: false }
 }
 
 export async function openVault(vault: StoredVault, password: string) {
