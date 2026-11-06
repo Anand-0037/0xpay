@@ -6,6 +6,7 @@ export type WalletSession = { id: string; railgunAddress: string; publicAddress:
 const STORAGE_KEY = '0xpay.vault.v1'
 let fundingWallet: HDNodeWallet | null = null
 let loadedWalletId: string | null = null
+let unlockedSdkKey: string | null = null
 const sessionGate = new SessionGate()
 
 export function hasStoredVault() { return localStorage.getItem(STORAGE_KEY) !== null }
@@ -46,6 +47,7 @@ async function unlockRecord(vault: StoredVault, password: string, generation: nu
   }
   fundingWallet = publicWallet
   loadedWalletId = info.id
+  unlockedSdkKey = sdkKey
   return { id: info.id, railgunAddress: info.railgunAddress, publicAddress: publicWallet.address }
 }
 
@@ -93,6 +95,7 @@ export async function lockLocalWallet() {
     const id = loadedWalletId
     loadedWalletId = null
     fundingWallet = null
+    unlockedSdkKey = null
     if (id) {
       const { unloadWalletByID } = await import('@railgun-community/wallet')
       unloadWalletByID(id)
@@ -103,4 +106,14 @@ export async function lockLocalWallet() {
 export function unlockedFundingWallet() {
   if (!fundingWallet) throw new Error('Wallet is locked')
   return fundingWallet
+}
+
+export function unlockedEncryptionKey() {
+  if (!unlockedSdkKey) throw new Error('Private wallet is locked')
+  return unlockedSdkKey
+}
+
+export function unlockedWalletId() {
+  if (!loadedWalletId) throw new Error('Private wallet is locked')
+  return loadedWalletId
 }

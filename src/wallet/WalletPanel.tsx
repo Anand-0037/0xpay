@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { JsonRpcProvider, formatEther } from 'ethers'
 import { APP_RPC_URL } from '../rpc'
 import { ShieldPanel } from './ShieldPanel'
+import { SendPanel } from './SendPanel'
 import { PrivateBalance } from './PrivateBalance'
 import {
   browserWalletAvailable, connectInjectedWallet, forgetInjectedWallet, watchInjectedWallet,
@@ -49,6 +50,7 @@ export function WalletPanel({ blockNumber, engineReady, shieldFeeBasisPoints, co
     if (!injected) return
     return watchInjectedWallet(() => {
       void import('../railgun/shield').then(({ discardShieldQuote }) => discardShieldQuote())
+      void import('../railgun/send').then(({ discardPrivateSendQuote }) => discardPrivateSendQuote())
       setInjected(null)
       setFundingBalance(null)
       setInjectedError('Browser wallet changed. Connect it again to use that account.')
@@ -103,6 +105,7 @@ export function WalletPanel({ blockNumber, engineReady, shieldFeeBasisPoints, co
 
   function selectLocalFunding() {
     void import('../railgun/shield').then(({ discardShieldQuote }) => discardShieldQuote())
+    void import('../railgun/send').then(({ discardPrivateSendQuote }) => discardPrivateSendQuote())
     forgetInjectedWallet()
     setInjected(null)
     setFundingBalance(null)
@@ -146,6 +149,8 @@ export function WalletPanel({ blockNumber, engineReady, shieldFeeBasisPoints, co
       await lockLocalWallet()
       const { discardShieldQuote } = await import('../railgun/shield')
       discardShieldQuote()
+      const { discardPrivateSendQuote } = await import('../railgun/send')
+      discardPrivateSendQuote()
       selectLocalFunding()
       onSession(null)
       setRecoveryPhrase('')
@@ -193,6 +198,22 @@ export function WalletPanel({ blockNumber, engineReady, shieldFeeBasisPoints, co
         onConfirm={async (transactionHash) => {
           const { confirmEthShield } = await import('../railgun/shield')
           const receipt = await confirmEthShield(transactionHash)
+          if (receipt.status === 'confirmed') setPrivateBalanceRefresh((value) => value + 1)
+          return receipt
+        }}
+      />}
+      {injected && !recoveryPhrase && engineReady && <SendPanel
+        onQuote={async (recipientAddress, amountWei) => {
+          const { quotePrivateWethSend } = await import('../railgun/send')
+          return quotePrivateWethSend(amountWei, recipientAddress)
+        }}
+        onSubmit={async (quote, onProofProgress) => {
+          const { submitPrivateWethSend } = await import('../railgun/send')
+          return submitPrivateWethSend(quote, onProofProgress)
+        }}
+        onConfirm={async (transactionHash) => {
+          const { confirmPrivateWethSend } = await import('../railgun/send')
+          const receipt = await confirmPrivateWethSend(transactionHash)
           if (receipt.status === 'confirmed') setPrivateBalanceRefresh((value) => value + 1)
           return receipt
         }}
