@@ -1,7 +1,6 @@
 // Covers fetch/XHR from this page. Anon-RPC's worker and browser-initiated
 // loads run in other contexts, so these counters are not a whole-browser audit.
 import { APP_RPC_URL, PRIVACY_NETWORKS, workerBootstrapParams, type PrivacyNetwork } from '../rpc/networks.ts'
-import { isPublicMarketRead } from './market-egress.ts'
 import { isPublicResearchBody } from './research-egress.ts'
 export type TrafficKind = 'app-static' | 'bootstrap' | 'worker-bundle' | 'market-api' | 'research-api' | 'poi' | 'artifacts' | 'indexer' | 'blocked'
 export type TrafficEntry = Readonly<{ kind: TrafficKind; host: string; outcome: 'sent' | 'failed' | 'blocked' }>
@@ -61,7 +60,8 @@ export function classifyOutgoingRequest(raw: string, method: string, body: unkno
   // precede the worker; every application RPC request remains blocked.
   if (url.href === bootstrapRpc) return method.toUpperCase() === 'POST' && validBootstrap(body, privacyNetwork) ? 'bootstrap' : 'blocked'
   if (url.href === APP_RPC) return 'blocked'
-  if (marketData && isPublicMarketRead(url, method, body)) return 'market-api'
+  // Market HTTP goes through the worker's explicit allowlisted transport too.
+  // Do not silently permit a dependency to bypass it with page fetch/XHR.
   if (resolvers.has(url.href) && method.toUpperCase() === 'GET') return 'worker-bundle'
   if (paymentServices && url.href === POI && method.toUpperCase() === 'POST') return 'poi'
   if (paymentServices && url.hostname === ARTIFACT_HOST && url.protocol === 'https:' && url.pathname.startsWith('/ipfs/') &&

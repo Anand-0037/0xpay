@@ -8,9 +8,9 @@ const book = 'https://clob.polymarket.com/book?token_id=123'
 const classify = (url: string, method = 'GET', body: unknown = undefined, enabled = true) =>
   classifyOutgoingRequest(url, method, body, origin, new Set(), false, 'nox', enabled)
 
-test('only the explicit agent entry enables the two bounded public venue reads', () => {
+test('public venue reads cannot bypass the worker through page fetch or XHR', () => {
   for (const url of [markets, book]) {
-    assert.equal(classify(url), 'market-api')
+    assert.equal(classify(url), 'blocked')
     assert.equal(classify(url, 'GET', undefined, false), 'blocked')
     assert.equal(classify(url, 'POST'), 'blocked')
     assert.equal(classify(url, 'GET', 'private request data'), 'blocked')

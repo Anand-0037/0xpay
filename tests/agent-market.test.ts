@@ -161,6 +161,39 @@ test('venue timeout cancels a stalled request without issuing retries', async (c
   })
 })
 
+test('injected private transport gets sixty seconds rather than the direct fifteen-second limit', async context => {
+  context.mock.timers.enable({ apis: ['setTimeout'] })
+  let calls = 0, direct = 0
+  let transportSignal: AbortSignal | undefined
+  await withFetch(async () => { direct++; throw new Error('Unexpected direct fetch') }, async () => {
+    const pending = loadMarkets(undefined, async (_url, signal) => new Promise<Response>((_resolve, reject) => {
+      calls++; transportSignal = signal
+      signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+    }))
+    const rejected = assert.rejects(pending, { name: 'TimeoutError' })
+    context.mock.timers.tick(15_001)
+    assert.equal(transportSignal?.aborted, false)
+    context.mock.timers.tick(44_999)
+    await rejected
+    assert.equal(calls, 1); assert.equal(direct, 0)
+    assert.equal(transportSignal?.aborted, true)
+  })
+})
+
+test('caller cancellation immediately reaches an injected private transport without retry', async () => {
+  const controller = new AbortController()
+  let calls = 0
+  const pending = loadOrderBook(market, 0, controller.signal, async (_url, signal) => new Promise<Response>((_resolve, reject) => {
+    calls++
+    signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+  }))
+  const rejected = assert.rejects(pending, { name: 'AbortError' })
+  controller.abort(); await rejected
+  assert.equal(calls, 1)
+  await assert.rejects(loadMarkets(controller.signal, async () => { calls++; return Response.json([]) }), { name: 'AbortError' })
+  assert.equal(calls, 1)
+})
+
 test('blocked/missing venue responses remain errors without fallback', async () => {
   for (const status of [403, 451, 404, 500]) {
     let calls = 0
