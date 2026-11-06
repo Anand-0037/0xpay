@@ -2,7 +2,7 @@
 
 0xPay is a devnet privacy wallet for fixed 0.1 ETH notes. Deposit into a Poseidon Merkle pool, then send to an address from a fresh zero-balance frame sender. A staked pool checks a Groth16 proof, sponsors the frame transaction, and pays the recipient from the note. The recipient needs no ETH or interaction. The pool needs an ETH gas float and deducts a claim fee from each note.
 
-The browser opens on a dashboard with public balance, locally encrypted private notes, token balances, and activity. It offers private send, payment links, and a step-by-step transaction view. Application RPC calls use the Nox Anon-RPC worker by default and stop if that route fails. The worker's bootstrap lookup and page/artifact downloads are separate network paths.
+After setup and unlock, the browser dashboard shows public balance, locally encrypted private notes, token balances, and activity. It offers private send, payment links, and a step-by-step transaction view. Application RPC calls use the Nox Anon-RPC worker by default and stop if that route fails. The worker's bootstrap lookup and page/artifact downloads are separate network paths.
 
 ```text
 Browser: encrypted notes + local proof
@@ -33,19 +33,21 @@ Checks: `npm run typecheck`, `npm test`, `npm run lint`, `npm run build`. The cu
 
 For a protocol rebuild, install each subpackage with `npm ci --ignore-scripts`, run `protocol/circuits/build.sh`, then `npm run build` and `forge test -vv --gas-report` in `protocol/contracts`, and `npm run typecheck`/`npm test` in `protocol/client`. The circuit build needs its documented Circom/SnarkJS toolchain. The deployment script writes a new throwaway key under `protocol/deployments/.deployer-key`; keep it private and never commit it.
 
-## Evidence and current limit
+## Evidence and current limits
 
-The [public devnet evidence](protocol/EVIDENCE.md) records a real included claim: `0x400610e5b79a02dbf8fe7e37127aa93b842a5265c2f859f5983f285af3a073ce`, block **3664**. All three frames succeeded, the pool paid gas, and a fresh recipient received **0.09714 devnet ETH** from a zero balance. The same signed claim was rejected by canonical prefix-gas rules and admitted by normal alternative-mempool submission. The earlier gateway timeout was resolved by submitting the identical transaction to the documented miner sidecar after verifying its hash and simulation.
+The [public devnet evidence](protocol/EVIDENCE.md) includes a funded **browser deposit → encrypted backup → fresh-profile restore → private claim → recipient payout** rehearsal on 6 November. Application calls used Nox Anon-RPC. The browser-generated claim [`0x6fd9da50ae8eda89f4a15b05b7eb9f1e0acc9248b5bb58431ec8c5f2a603f8e9`](https://explorer.altmempool.wtf/tx/0x6fd9da50ae8eda89f4a15b05b7eb9f1e0acc9248b5bb58431ec8c5f2a603f8e9?node=https%3A%2F%2Faltmempool.forshtat.com%2Frpc) was included in public block **4386**: all three frames succeeded, the pool paid gas, and a previously empty recipient received **0.09614 devnet ETH**, after the reviewed **0.00386 ETH claim fee**. Canonical submission rejected the real validation prefix; the normal alternative mempool admitted and included it. [Browser receipt and screenshot](docs/evidence/public-browser-2026-11-06/) are recorded separately from local-chain tests.
 
-[Open the included claim and its 24 passing admission checks](https://explorer.altmempool.wtf/tx/0x400610e5b79a02dbf8fe7e37127aa93b842a5265c2f859f5983f285af3a073ce?node=https%3A%2F%2Faltmempool.forshtat.com%2Frpc).
+This used a locally served production build and a disposable wallet, not the hosted website. The independent receipt/native-transfer check used direct public RPC as test instrumentation. The app's faucet funding was supplied by separate test automation. The first immediate reload hit a bootstrap HTTP 429. A later clean-profile load reconciled the spent note through Nox; explicit disconnect blocked private send. Hosted-release verification and mobile Safari remain separate gates.
 
-A separate local sidecar configured with BN254 precompiles admitted and included claim `0xaa61ab27648734771229378ca370e36c774b1c8a4cbded9cf0ecc0b3a9b42ebb` (local block 198, type 6, receipt status success). Replay, recipient tampering, wrong root, and wrong second frame were rejected in local negative controls. This local CLI used direct loopback RPC, not Anon-RPC. The browser route was separately observed reaching public devnet chain 1337 through Nox; an end-to-end browser deposit and claim remains unverified.
+An earlier [public CLI claim](https://explorer.altmempool.wtf/tx/0x400610e5b79a02dbf8fe7e37127aa93b842a5265c2f859f5983f285af3a073ce?node=https%3A%2F%2Faltmempool.forshtat.com%2Frpc) was included in block **3664** and paid **0.09714 devnet ETH** using an older **0.00286 ETH** fee. The browser rehearsal exposed insufficient execution/state budget for a fresh recipient; exact-signed simulation verified the larger current budget before submission. These are distinct transactions and quotes.
+
+A separate local sidecar admitted and included claim `0xaa61ab27648734771229378ca370e36c774b1c8a4cbded9cf0ecc0b3a9b42ebb` (local block 198, type 6, receipt success). Local replay, recipient tampering, wrong-root and wrong-frame controls were rejected. That CLI used direct loopback RPC, not Anon-RPC.
 
 ## Privacy and safety
 
 The deposit amount and transaction are public. A claim's recipient and payout are public. Deposit-to-claim linkage is obscured only within the pool's anonymity set; small pools, timing, and fixed denominations still leak context. Anon-RPC hides the browser's IP from the RPC for routed calls, but the RPC still sees request contents. A payment link is a bearer secret in a URL fragment: anyone who receives it can claim the note. The link-claim payout goes to the receiver's unlocked wallet; a fresh zero-ETH key submits the frame.
 
-Recovery words restore the funding account, but they do **not** reconstruct randomly generated private notes. The wallet can export and restore a separate encrypted note backup; its file and password must be kept safely. The backup flow is covered by local tests but has not yet been verified in a fresh browser, so this devnet build is not ready for real funds.
+Recovery words restore the funding account, but they do **not** reconstruct randomly generated private notes. The wallet can export and restore a separate encrypted note backup; its file and password must be kept safely. A real encrypted backup was restored with external HTTPS blocked in a clean browser profile, reconciled through Nox, and used for the public browser claim above. This remains unaudited devnet software and is not ready for real funds.
 
 ## CROPS
 

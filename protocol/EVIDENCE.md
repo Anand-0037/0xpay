@@ -1,6 +1,6 @@
 # Evidence (real runs, public devnet chain 1337)
 
-All values below were produced by commands run on 6 Nov 2026 (UTC ~11:00–11:30). Explorer: https://explorer.altmempool.wtf/ (search the hash).
+Values below were produced on 6 Nov 2026; each later section records the updated result. Explorer: https://explorer.altmempool.wtf/ (search the hash).
 
 ## Pool deployment (`npm run deploy`, client/)
 - Poseidon2 `0x3c913baa92e0bab4b6a56782f305dc62414298b0` (tx `0xba90b38c32b4bdddde51597b74fd8faebb6aafe8edb9057bdf40c342fd96bcbb`)
@@ -53,3 +53,18 @@ The earlier timeout is resolved. The gateway was in manual mode with zero connec
 This is a verified public CLI payment. The full canonical browser wallet through Anon-RPC still needs a fresh end-to-end rehearsal after the local safety fixes.
 
 Independent read-only verification confirmed a stable receipt block on both endpoints, a spent nullifier, an exact native-transfer log from the pool to the recipient, and miner explorer **OnChain / included, 24 checks passed, no skipped checks**. Historical balance tags on this devnet can return the latest balance, so the transfer log and receipt are the payout evidence; the latest balance is informational. Actual gas used: **688,878**. [Miner explorer](https://explorer.altmempool.wtf/tx/0x400610e5b79a02dbf8fe7e37127aa93b842a5265c2f859f5983f285af3a073ce?node=https%3A%2F%2Faltmempool.forshtat.com%2Frpc).
+
+## Public browser deposit, backup recovery and included claim — 13:27–13:47 UTC
+
+A disposable browser wallet deposited a real 0.1 devnet ETH note through Nox Anon-RPC. The UI exported an encrypted note backup. A clean browser profile imported the same funding account and restored the backup while external HTTPS requests were blocked. After an explicit Nox reconnect, the restored note was confirmed unspent. No wallet mnemonic, private key, backup password or note secret is included in these evidence files.
+
+The initial claim simulation failed before submission because the fresh-recipient execution/state budget was insufficient. Exact-signed simulation compared budgets without broadcasting: raising execution gas alone failed; raising both execution and state budgets succeeded. The final browser review showed a 0.00386 ETH claim fee and 0.09614 ETH recipient amount.
+
+- Browser claim: `0x6fd9da50ae8eda89f4a15b05b7eb9f1e0acc9248b5bb58431ec8c5f2a603f8e9`.
+- Public block **4386**, block hash `0x64e17b8b30628096678de8a304ac74717b032548838f69952a62a59d45cd0a03`.
+- All three frame receipts succeeded; payer is pool `0xf409d9a52cd9b8c61a44cc8c9cdef0d85b58259c`.
+- Recipient `0x7e7df472ce15a4d847b20d085e89b708c9f4133d` was empty before submission and received exactly **96,140,000,000,000,000 wei**. The protocol native-transfer log and pool Claim event agree with the reviewed recipient and fee.
+- The browser generated the proof in about **0.8 seconds**, received a real canonical MAX_VERIFY_GAS rejection, and submitted normally through `eth_sendFrameTransaction`.
+- The completed note was saved as **spent** with this exact claim hash in encrypted browser storage. The first immediate reload hit bootstrap HTTP 429. A later clean-profile load reconciled zero unspent notes through Nox; explicit disconnect disabled private send, with no second claim. This receipt does not establish finality.
+
+[Public receipt, recovery stages and browser screenshot](../docs/evidence/public-browser-2026-11-06/) · [Open browser claim](https://explorer.altmempool.wtf/tx/0x6fd9da50ae8eda89f4a15b05b7eb9f1e0acc9248b5bb58431ec8c5f2a603f8e9?node=https%3A%2F%2Faltmempool.forshtat.com%2Frpc). This rehearsal used a locally served production build, public synthetic ETH, and external test funding; it is not evidence that the hosted release or iPhone Safari works. Independent read-only receipt checks were direct test instrumentation, separate from the application's worker transport.

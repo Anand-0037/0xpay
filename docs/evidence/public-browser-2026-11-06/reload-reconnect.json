@@ -1,0 +1,24 @@
+{
+  "started": "2026-11-06T13:55:25.995Z",
+  "txHash": "0x6fd9da50ae8eda89f4a15b05b7eb9f1e0acc9248b5bb58431ec8c5f2a603f8e9",
+  "stages": [
+    {
+      "name": "spent-record-visible-offline-after-new-profile-load",
+      "at": "2026-11-06T13:55:27.363Z"
+    },
+    {
+      "name": "spent-note-reconciled-zero-unspent-through-Nox",
+      "at": "2026-11-06T13:55:34.764Z"
+    },
+    {
+      "name": "explicit-disconnect-blocks-send",
+      "at": "2026-11-06T13:55:35.639Z"
+    },
+    {
+      "name": "completed",
+      "at": "2026-11-06T13:55:36.058Z"
+    }
+  ],
+  "routeEvidence": "Connection\n×\nConnected through Nox\n\nAlt mempool devnet · chain 1337\n\nPrivacy network \nNox\nNym\n\nSwitching reloads the private connection.\n\nYour wallet’s blockchain requests use Nox. If the connection fails, chain requests stop. Unlock and encrypted backup remain available offline.\n\nTechnical details\nNetwork\nAlt mempool devnet · chain 1337 · connection checked at block 4,466\nWorker\nNox via Anon-RPC\nRPC requests\n2/2 completed through worker · 0 failed\nRPC read calls\n2/2 transport replies · 0 failed\nSigned broadcasts\n0/0 transport replies · 0 failed\nWorker bootstrap\n2 direct specifier reads\nOther page requests\nartifacts 0 direct · blocked 0\nPrivacy pool\nRPC route ready; pool state checked when the wallet loads\nRPC methods observed\n\nThe counters record requests observed through the worker; a broadcast is counted only when attempted. Worker bootstrap and proof artifact downloads are outside routed RPC. This panel counts page fetch and XHR, not worker internals or browser-native loads. A successful request alone does not prove anonymity.\n\nRecent page destinations\nworker-bundle\nraw.githubusercontent.com\nsent\nbootstrap\nethereum-sepolia-rpc.publicnode.com\nsent\nbootstrap\nethereum-sepolia-rpc.publicnode.com\nsent\nDisconnect private route",
+  "sendButtonDisabled": true
+}
