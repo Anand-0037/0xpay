@@ -52,7 +52,7 @@ function pending(value: unknown, note: Note): PreparedPayment {
   return { ...common, operation: 'claim', recipient, nullifierHash, feeWei: fee.toString() }
 }
 function parseRecord(value: unknown, expected: BackupContext): StoredNote {
-  const record = object(value); shape(record, ['note', 'status'], ['txHash', 'pending'])
+  const record = object(value); shape(record, ['note', 'status'], ['source', 'txHash', 'pending'])
   const raw = object(record.note); shape(raw, ['nullifier', 'secret', 'commitment', 'pool', 'chainId'])
   const note: Note = { nullifier: decimal(raw.nullifier), secret: decimal(raw.secret), commitment: hex(raw.commitment, 32), pool: hex(raw.pool, 20), chainId: raw.chainId as number }
   if (note.nullifier <= 0n || note.nullifier >= FIELD || note.secret <= 0n || note.secret >= FIELD || !Number.isSafeInteger(note.chainId)) throw new Error('Invalid private note fields')
@@ -60,6 +60,10 @@ function parseRecord(value: unknown, expected: BackupContext): StoredNote {
   if (hash(note.nullifier, note.secret) !== BigInt(note.commitment)) throw new Error('Note backup commitment does not match its private fields')
   if (!['pending-deposit', 'unspent', 'spending', 'spent'].includes(String(record.status))) throw new Error('Invalid backed-up note status')
   const result: StoredNote = { note, status: record.status as StoredNote['status'] }
+  if (record.source !== undefined) {
+    if (record.source !== 'link') throw new Error('Invalid note backup source')
+    result.source = 'link'
+  }
   if (record.txHash !== undefined) result.txHash = hex(record.txHash, 32)
   if (record.pending !== undefined) {
     result.pending = pending(record.pending, note)
@@ -139,6 +143,7 @@ export function mergeRestoredNotes(current: StoredNote[], imported: StoredNote[]
     const previous = merged[index]
     if (previous.note.nullifier !== record.note.nullifier || previous.note.secret !== record.note.secret) throw new Error('Existing note does not match this backup')
     if (rank[record.status] > rank[previous.status]) merged[index] = { ...record, note: { ...record.note } }
+    else if (record.source === 'link') previous.source = 'link'
     return true
   }
   for (const record of current) combine(record)

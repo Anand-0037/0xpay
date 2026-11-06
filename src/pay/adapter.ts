@@ -8,7 +8,7 @@ export function adaptPoolApi(pool: PoolApi): PayApi {
   return {
     getPublicBalance: () => pool.getPublicBalance(address()),
     getPrivateBalance: () => pool.getPrivateBalance(),
-    listNotes: async () => (await pool.listNotes()).map(entry => ({ commitment: entry.note.commitment, spent: entry.status !== 'unspent' })),
+    listNotes: async () => (await pool.listNotes()).map(entry => ({ commitment: entry.note.commitment, spent: entry.status !== 'unspent', source: entry.source })),
     exportNoteBackup: pool.exportNoteBackup,
     restoreNoteBackup: pool.restoreNoteBackup,
     getClaimQuote: pool.getClaimQuote,
@@ -35,6 +35,8 @@ export function adaptPoolApi(pool: PoolApi): PayApi {
       return pool.createPaymentLink(entry.note)
     },
     claimLink: (link, onStep) => pool.claimLink(link, onStep),
+    importPaymentLink: pool.importPaymentLink,
+    claimImportedLink: pool.claimImportedLink,
     tokenPortfolio: async () => (await pool.tokenPortfolio(address())).map(token => ({ symbol: token.symbol, balance: token.balance })),
     activity: async () => (await pool.activity()).map(item => ({ id: item.commitment, title: item.status, kind: item.status, txHash: item.txHash, pending: item.pending, operation: item.operation })),
     route: () => ({ kind: 'unknown', worker: null, calls: null, direct: null }),

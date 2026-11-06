@@ -190,17 +190,43 @@ export function createPoolApi(route: PrivateRpc) {
       return { status: 'verified' as const, operation: intent.operation, txHash: intent.txHash, blockNumber }
     },
     createPaymentLink: (note: Note) => encodeNoteLink(note, window.location.href.split('#')[0]),
-    claimLink: async (link: string, onStep: (step: ClaimStep) => void): Promise<{ txHash: Hex; blockNumber: bigint }> => {
+    importPaymentLink: async (link: string): Promise<Hex> => {
       const session = captureNoteSession()
-      const recipient = unlockedFundingWallet().address as Hex
       const note = decodeNoteLink(link)
       if (note.chainId !== config.chainId || note.pool.toLowerCase() !== config.pool.toLowerCase()) throw new Error('Payment link belongs to another network or pool')
       await mutateStoredNotes(records => {
-        if (!records.some(entry => entry.note.commitment === note.commitment)) records.push({ note, status: 'unspent' })
+        const existing = records.find(entry => entry.note.commitment.toLowerCase() === note.commitment.toLowerCase())
+        if (existing) {
+          if (existing.note.nullifier !== note.nullifier || existing.note.secret !== note.secret
+            || existing.note.chainId !== note.chainId || existing.note.pool.toLowerCase() !== note.pool.toLowerCase())
+            throw new Error('Stored note does not match this payment link')
+          if (existing.status === 'spent' || existing.status === 'spending' || existing.pending)
+            throw new Error('Payment link note is already used or awaiting verification')
+          existing.source = 'link'
+        } else {
+          // An imported bearer note is not spendable until a routed chain read
+          // verifies its deposit and unspent nullifier.
+          records.push({ note, status: 'pending-deposit', source: 'link' })
+        }
       }, session)
       assertNoteSession(session)
-      const [result] = await api.privateSend({ to: recipient, notes: [note], onStep })
+      return note.commitment
+    },
+    claimImportedLink: async (commitment: Hex, onStep: (step: ClaimStep) => void): Promise<{ txHash: Hex; blockNumber: bigint }> => {
+      if (!/^0x[0-9a-f]{64}$/i.test(commitment)) throw new Error('Invalid imported note commitment')
+      const session = captureNoteSession()
+      const records = activeNotes(await reconcileNotes(sessionTransport(session), session))
+      assertNoteSession(session)
+      const entry = records.find(value => value.note.commitment.toLowerCase() === commitment.toLowerCase())
+      if (!entry || entry.source !== 'link') throw new Error('Imported payment link note was not found in this wallet')
+      if (entry.status !== 'unspent' || entry.pending) throw new Error('Payment link note is not yet verified as spendable; check the chain or existing transaction')
+      const recipient = unlockedFundingWallet().address as Hex
+      const [result] = await api.privateSend({ to: recipient, notes: [entry.note], onStep })
       return result
+    },
+    claimLink: async (link: string, onStep: (step: ClaimStep) => void): Promise<{ txHash: Hex; blockNumber: bigint }> => {
+      const commitment = await api.importPaymentLink(link)
+      return api.claimImportedLink(commitment, onStep)
     },
     tokenPortfolio: (address: Hex) => tokenPortfolio(address, transport),
     activity: async () => activeNotes(await listStoredNotes()).map(x => ({ commitment: x.note.commitment, status: x.status, txHash: x.txHash, pending: Boolean(x.pending), operation: x.pending?.operation })),
@@ -228,7 +254,7 @@ export function createPayApi(route: PrivateRpc): import('../pay/types.ts').PayAp
   return {
     getPublicBalance: () => core.getPublicBalance(address()),
     getPrivateBalance: core.getPrivateBalance,
-    listNotes: async () => (await core.listNotes()).map(x => ({ commitment: x.note.commitment, spent: x.status !== 'unspent', status: x.status })),
+    listNotes: async () => (await core.listNotes()).map(x => ({ commitment: x.note.commitment, spent: x.status !== 'unspent', status: x.status, source: x.source })),
     exportNoteBackup: core.exportNoteBackup,
     restoreNoteBackup: core.restoreNoteBackup,
     getClaimQuote: core.getClaimQuote,
@@ -256,6 +282,8 @@ export function createPayApi(route: PrivateRpc): import('../pay/types.ts').PayAp
       return core.createPaymentLink(entry.note)
     },
     claimLink: core.claimLink,
+    importPaymentLink: core.importPaymentLink,
+    claimImportedLink: core.claimImportedLink,
     tokenPortfolio: () => core.tokenPortfolio(address()).then(tokens => tokens.map(x => ({ ...x, decimals: x.symbol === 'USDC' || x.symbol === 'USDT' ? 6 : 18 }))),
     activity: async () => (await core.activity()).map((x, i) => ({ id: `${i}:${x.commitment}`, kind: x.status, txHash: x.txHash, pending: x.pending, operation: x.operation })),
     route: () => ({ kind: 'anon-rpc', worker: route.network, calls: route.stats.attempted, direct: 0 }),

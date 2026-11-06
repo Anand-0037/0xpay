@@ -1,6 +1,6 @@
 /** Temporary contract for the pool API. Keep this file aligned with src/pool/API.md. */
 export type Address = `0x${string}`
-export type Note = { commitment?: Address; spent?: boolean; [key: string]: unknown }
+export type Note = { commitment?: Address; spent?: boolean; source?: 'link'; [key: string]: unknown }
 export type Activity = { id?: string; kind?: string; title?: string; timestamp?: number | string; txHash?: Address; amountWei?: bigint; pending?: boolean; operation?: 'deposit' | 'claim'; [key: string]: unknown }
 export type PendingPaymentCheck = { status: 'pending'; operation: 'deposit' | 'claim'; txHash: Address } | { status: 'verified'; operation: 'deposit' | 'claim'; txHash: Address; blockNumber: bigint }
 export type ClaimStep =
@@ -25,6 +25,8 @@ export type PayApi = {
   depositNotes(count: number, onStep: (step: ClaimStep) => void): Promise<unknown>
   privateSend(args: { to: Address; count: number; onStep: (step: ClaimStep) => void }): Promise<{ txHashes: Address[] }>
   createPaymentLink(): Promise<string>
+  importPaymentLink(link: string): Promise<Address>
+  claimImportedLink(commitment: Address, onStep: (step: ClaimStep) => void): Promise<unknown>
   claimLink(link: string, onStep: (step: ClaimStep) => void): Promise<unknown>
   tokenPortfolio(): Promise<{ symbol: string; balance: bigint; decimals?: number }[]>
   activity(): Promise<Activity[]>

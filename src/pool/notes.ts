@@ -7,7 +7,7 @@ import { assertUnlockedSession, unlockedEncryptionKey, unlockedSessionVersion, u
 import { keccak256, toHex, type Hex } from 'viem'
 import type { PreparedPayment } from './payment-records.ts'
 export type NoteStatus = 'pending-deposit' | 'unspent' | 'spending' | 'spent'
-export type StoredNote = { note: Note; status: NoteStatus; txHash?: `0x${string}`; pending?: PreparedPayment }
+export type StoredNote = { note: Note; status: NoteStatus; source?: 'link'; txHash?: `0x${string}`; pending?: PreparedPayment }
 const prefix = '0xpay.notes.v1.'
 const claimTopic = keccak256(toHex('Claim(address,bytes32,uint256)'))
 export type NoteSession = { id: string; version: number }
@@ -30,7 +30,7 @@ export async function listStoredNotes(session = captureNoteSession()): Promise<S
   const envelope = JSON.parse(raw) as { iv: string; data: string }
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes(envelope.iv) }, await key(session), bytes(envelope.data))
   assertNoteSession(session)
-  const serialized = JSON.parse(new TextDecoder().decode(plain)) as { note: Omit<Note, 'nullifier' | 'secret'> & { nullifier: string; secret: string }; status: NoteStatus; txHash?: `0x${string}` }[]
+  const serialized = JSON.parse(new TextDecoder().decode(plain)) as { note: Omit<Note, 'nullifier' | 'secret'> & { nullifier: string; secret: string }; status: NoteStatus; source?: 'link'; txHash?: `0x${string}`; pending?: PreparedPayment }[]
   return serialized.map(x => ({ ...x, note: { ...x.note, nullifier: BigInt(x.note.nullifier), secret: BigInt(x.note.secret) } }))
 }
 async function writeStoredNotes(notes: StoredNote[], session: NoteSession) {

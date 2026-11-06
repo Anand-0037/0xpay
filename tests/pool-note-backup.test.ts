@@ -38,6 +38,20 @@ test('encrypted backups round-trip notes without exposing their fields, owner or
   assert.equal(decoded[0].note.commitment, record.note.commitment.toLowerCase())
   assert.notEqual(await encryptNoteBackup([record], owner, password), encoded)
 })
+test('link-origin notes keep their source in encrypted backups but restore as pending', async () => {
+  const record = { ...makeRecord(), source: 'link' as const }
+  const encoded = await encryptNoteBackup([record], owner, password)
+  const [decoded] = await decryptNoteBackup(encoded, password, owner)
+  assert.equal(decoded.source, 'link')
+  assert.equal(encoded.includes('"source":"link"'), false)
+  const restored = mergeRestoredNotes([], [decoded])
+  assert.equal(restored.notes[0].source, 'link')
+  assert.equal(restored.notes[0].status, 'pending-deposit')
+  const existing = mergeRestoredNotes([{ ...record, source: undefined }], [decoded])
+  assert.equal(existing.notes[0].source, 'link')
+  assert.equal(existing.notes[0].status, 'unspent')
+  await assert.rejects(encryptNoteBackup([{ ...record, source: 'other' as 'link' }], owner, password), /Invalid note backup source/)
+})
 test('a wrong password, damaged file or unsupported encryption settings leave restore unavailable', async () => {
   const encoded = await encryptNoteBackup([makeRecord()], owner, password)
   await assert.rejects(decryptNoteBackup(encoded, 'another disposable password', owner), /Could not decrypt/)
