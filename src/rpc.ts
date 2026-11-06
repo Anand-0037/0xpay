@@ -24,13 +24,19 @@ async function bootstrapRequest({ method, params }: { method: string; params?: u
     call.to.toLowerCase() !== NYM_SPECIFIER.toLowerCase() || !BOOTSTRAP_SELECTORS.has(call.data) || params?.[1] !== 'latest') {
     throw new Error('Direct RPC is reserved for worker bootstrap')
   }
+  const id = nextId++
   const response = await fetch(BOOTSTRAP_RPC_URL, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: nextId++, method, params }),
+    signal: AbortSignal.timeout(30_000),
+    body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
   })
   if (!response.ok) throw new Error(`Bootstrap RPC returned HTTP ${response.status}`)
   const payload: unknown = await response.json()
-  if (typeof payload !== 'object' || payload === null || !('result' in payload)) throw new Error('Bootstrap RPC did not return a result')
+  if (typeof payload !== 'object' || payload === null || !('result' in payload) ||
+    !('id' in payload) || payload.id !== id || !('jsonrpc' in payload) || payload.jsonrpc !== '2.0' ||
+    'error' in payload || typeof payload.result !== 'string' || !/^0x(?:[0-9a-f]{2})*$/i.test(payload.result)) {
+    throw new Error('Bootstrap RPC did not return a valid worker record')
+  }
   return payload.result
 }
 
