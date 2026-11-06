@@ -127,6 +127,29 @@ test('ordinary reconciliation cannot release an exact pending intent but updates
   assert.equal(records[1].status, 'unspent')
 })
 
+test('a note spent in another browser records the claim hash rather than its deposit hash', async () => {
+  const note = createNote(config.pool, config.chainId)
+  const depositHash = txHash
+  const claimHash = `0x${'c'.repeat(64)}` as Hex
+  const nullifierHash = toHex(hash(note.nullifier), { size: 32 })
+  const depositLog = { address: config.pool, topics: encodeEventTopics({ abi: [depositEvent], args: { commitment: note.commitment } }) as Hex[],
+    data: encodeAbiParameters([{ type: 'uint32' }, { type: 'uint256' }], [0, 1n]), transactionHash: depositHash }
+  const claimLog = { address: config.pool, topics: encodeEventTopics({ abi: [claimEvent], args: { recipient, nullifierHash } }) as Hex[],
+    data: encodeAbiParameters([{ type: 'uint256' }], [2_860_000_000_000_000n]), transactionHash: claimHash }
+  const depositTopic = keccak256(new TextEncoder().encode('Deposit(bytes32,uint32,uint256)'))
+  await saveStoredNotes([{ note, status: 'unspent', txHash: depositHash }])
+  const transport = async (_url: string, body: unknown) => {
+    const request = body as { id: number; method: string; params: [{ topics: Hex[] }] }
+    assert.equal(request.method, 'eth_getLogs')
+    return { jsonrpc: '2.0', id: request.id, result: request.params[0].topics[0] === depositTopic ? [depositLog] : [claimLog] }
+  }
+  await reconcileNotes(transport)
+  assert.equal((await listStoredNotes())[0].status, 'spent')
+  assert.equal((await listStoredNotes())[0].txHash, claimHash)
+  await reconcileNotes(transport)
+  assert.equal((await listStoredNotes())[0].txHash, claimHash)
+})
+
 test('an interrupted pre-broadcast claim releases only a proven deposit reservation after reload', async () => {
   const note = createNote(config.pool, config.chainId)
   const depositLog = { address: config.pool,

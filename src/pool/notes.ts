@@ -95,15 +95,16 @@ export async function saveStoredNotes(notes: StoredNote[], session = captureNote
     }
   }, session)
 }
-export async function claimedNullifiers(transport: RpcTransport): Promise<Set<string>> {
-  const logs = await rpc<{ topics: Hex[] }[]>(config.mempoolRpc, 'eth_getLogs', [{
+export async function claimedNullifiers(transport: RpcTransport): Promise<Map<string, Hex | undefined>> {
+  const logs = await rpc<{ topics: Hex[]; transactionHash?: Hex }[]>(config.mempoolRpc, 'eth_getLogs', [{
     address: config.pool, fromBlock: '0x0', toBlock: 'latest', topics: [claimTopic],
   }], transport)
-  const claimed = new Set<string>()
+  const claimed = new Map<string, Hex | undefined>()
   for (const log of logs) {
     if (log.topics.length < 3 || log.topics[0]?.toLowerCase() !== claimTopic.toLowerCase()
       || !/^0x[0-9a-f]{64}$/i.test(log.topics[2])) throw new Error('Invalid Claim event log')
-    claimed.add(log.topics[2].toLowerCase())
+    if (log.transactionHash !== undefined && !/^0x[0-9a-f]{64}$/i.test(log.transactionHash)) throw new Error('Invalid Claim transaction hash')
+    claimed.set(log.topics[2].toLowerCase(), log.transactionHash)
   }
   return claimed
 }
@@ -119,15 +120,24 @@ export async function reconcileNotes(transport: RpcTransport, session = captureN
     for (const entry of current) {
       // Absence from a later RPC response cannot resurrect a spent note, and
       // this pool's reconciliation must not change another pool's records.
-      if (entry.status === 'spent' || entry.pending || entry.note.chainId !== config.chainId || entry.note.pool.toLowerCase() !== config.pool.toLowerCase()) continue
+      if (entry.pending || entry.note.chainId !== config.chainId || entry.note.pool.toLowerCase() !== config.pool.toLowerCase()) continue
       const previous = observed.get(noteId(entry))
       // Do not overwrite a note created, reserved, or confirmed while these
       // network reads were pending. A later refresh can reconcile that note.
       if (!previous || previous.status !== entry.status || previous.txHash !== entry.txHash) continue
+      const nullifierHash = `0x${hash(entry.note.nullifier).toString(16).padStart(64, '0')}` as const
+      if (entry.status === 'spent') {
+        // A different browser may have spent the note. Keep the conservative
+        // spent state, but replace an old deposit reference with the claim hash.
+        const claimHash = claimed.get(nullifierHash.toLowerCase())
+        if (claimHash) entry.txHash = claimHash
+        continue
+      }
       const exists = logs.some(x => x.commitment.toLowerCase() === entry.note.commitment.toLowerCase())
       if (!exists) { if (entry.status !== 'spending') entry.status = 'pending-deposit'; continue }
-      const nullifierHash = `0x${hash(entry.note.nullifier).toString(16).padStart(64, '0')}` as const
+      const claimHash = claimed.get(nullifierHash.toLowerCase())
       entry.status = claimed.has(nullifierHash.toLowerCase()) ? 'spent' : entry.status === 'spending' ? 'spending' : 'unspent'
+      if (claimHash) entry.txHash = claimHash
     }
   }, session)
   // A claim cannot be broadcast until its signed hash and pending intent have

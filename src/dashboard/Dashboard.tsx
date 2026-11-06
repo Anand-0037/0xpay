@@ -25,6 +25,22 @@ function Balance({ value, failed = false }: { value: bigint | null; failed?: boo
   return value === null ? <span className="px-skeleton px-balance-skeleton" aria-label="Loading balance" /> : <strong className="px-value" title={`${value} wei`}>{formatEth(value)} <small>ETH</small></strong>
 }
 
+function activityLabel(item: Activity): string {
+  switch (item.kind) {
+    case 'pending-deposit': return 'Deposit pending'
+    case 'unspent': return 'Private note ready'
+    case 'spending': return 'Payment in progress'
+    case 'spent': return 'Private note spent'
+    default: return item.title ?? 'Transaction'
+  }
+}
+
+function activityDetail(item: Activity): string {
+  if (item.timestamp) return new Date(item.timestamp).toLocaleString()
+  if (item.kind === 'spending' && item.operation !== 'claim') return 'Preparing payment'
+  return item.txHash ? `Tx · ${item.txHash.slice(0, 10)}…` : 'On chain'
+}
+
 export default function Dashboard({ data, errors = {}, onNavigate, onRetry, canRetry = true, privateNotesOnly = false, onPrivateNotesOnlyChange }: {
   data: DashboardData
   errors?: DashboardErrors
@@ -44,7 +60,7 @@ export default function Dashboard({ data, errors = {}, onNavigate, onRetry, canR
     </section>
     <div className="px-section-grid">
       <section className="px-panel"><div className="px-section-title"><div><p className="px-kicker">ASSETS</p><h2>Portfolio</h2></div><span className="px-muted">Devnet</span></div>{privateNotesOnly ? <p className="px-empty">Public token reads paused.</p> : errors.tokens ? readError('Portfolio') : data.tokens === null ? <div className="px-list-skeleton" aria-label="Loading portfolio"><span className="px-skeleton" /><span className="px-skeleton" /></div> : data.tokens.length ? data.tokens.map((token, i) => <div className="px-list-row" key={`${token.symbol}-${i}`}><span className="px-asset-icon" aria-hidden="true">{token.symbol.slice(0, 1)}</span><span><strong>{token.symbol}</strong><small>Public token</small></span><strong className="px-row-end">{Number.isSafeInteger(token.decimals) ? formatEth(token.balance * ETH / 10n ** BigInt(token.decimals ?? 0)) : '—'}</strong></div>) : <p className="px-empty">No public tokens found.</p>}</section>
-      <section className="px-panel"><div className="px-section-title"><div><p className="px-kicker">YOUR PAYMENTS</p><h2>Activity</h2></div><span className="px-muted">Recent</span></div>{errors.activity ? readError('Activity') : data.activity === null ? <div className="px-list-skeleton" aria-label="Loading activity"><span className="px-skeleton" /><span className="px-skeleton" /></div> : data.activity.length ? data.activity.map((item, i) => <div className="px-list-row" key={item.id ?? item.txHash ?? i}><span className="px-asset-icon" aria-hidden="true">↗</span><span><strong>{item.title ?? item.kind ?? 'Transaction'}</strong><small>{item.timestamp ? new Date(item.timestamp).toLocaleString() : item.txHash ? `${item.txHash.slice(0, 10)}…` : 'On chain'}</small></span><strong className="px-row-end">{typeof item.amountWei === 'bigint' ? `${formatEth(item.amountWei)} ETH` : ''}</strong></div>) : <p className="px-empty">Your first deposit or payment will appear here.</p>}</section>
+      <section className="px-panel"><div className="px-section-title"><div><p className="px-kicker">YOUR PAYMENTS</p><h2>Activity</h2></div><span className="px-muted">Recent</span></div>{errors.activity ? readError('Activity') : data.activity === null ? <div className="px-list-skeleton" aria-label="Loading activity"><span className="px-skeleton" /><span className="px-skeleton" /></div> : data.activity.length ? data.activity.map((item, i) => <div className="px-list-row" key={item.id ?? item.txHash ?? i}><span className="px-asset-icon" aria-hidden="true">↗</span><span><strong>{activityLabel(item)}</strong><small>{activityDetail(item)}</small></span><strong className="px-row-end">{typeof item.amountWei === 'bigint' ? `${formatEth(item.amountWei)} ETH` : ''}</strong></div>) : <p className="px-empty">Your first deposit or payment will appear here.</p>}</section>
     </div>
     <section className="px-shortcuts"><div><p className="px-kicker">ONE WALLET. REAL MOMENTS.</p><h2>Make it a payment.</h2></div><div className="px-shortcut-grid"><button onClick={() => onNavigate('send')}><span aria-hidden="true">↗</span><strong>Pay a contributor</strong><small>Send to their address</small></button><button onClick={() => onNavigate('link')}><span aria-hidden="true">▤</span><strong>Send a payment link</strong><small>Share a note privately</small></button><button onClick={() => onNavigate('send')}><span aria-hidden="true">✳</span><strong>Tip a creator</strong><small>The pool pays claim gas</small></button></div></section>
   </>

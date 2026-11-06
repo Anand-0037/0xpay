@@ -22,12 +22,13 @@ test('note secrets are encrypted at rest and recover after unlock', async () => 
 test('claim reconciliation reads the full event set without exposing a note nullifier', async () => {
   const topic = keccak256(toHex('Claim(address,bytes32,uint256)'))
   const nullifierHash = `0x${'ab'.repeat(32)}` as const
+  const claimHash = `0x${'cd'.repeat(32)}` as const
   const requests: unknown[] = []
   const claimed = await claimedNullifiers(async (_url, body) => {
     requests.push(body)
-    return { jsonrpc: '2.0', id: 1, result: [{ topics: [topic, `0x${'00'.repeat(32)}`, nullifierHash] }] }
+    return { jsonrpc: '2.0', id: 1, result: [{ topics: [topic, `0x${'00'.repeat(32)}`, nullifierHash], transactionHash: claimHash }] }
   })
-  assert.deepEqual([...claimed], [nullifierHash])
+  assert.deepEqual([...claimed], [[nullifierHash, claimHash]])
   const request = requests[0] as { method: string; params: [{ topics: string[]; address: string }] }
   assert.equal(request.method, 'eth_getLogs')
   assert.equal(request.params[0].address, config.pool)

@@ -50,3 +50,14 @@ test('private notes mode does not render cached funding or token balances', () =
   assert.match(html, /0\.1 <small>ETH/)
   assert.doesNotMatch(html, /12 <small>ETH|USDC|250|Public balance unavailable|Portfolio unavailable|Loading portfolio/)
 })
+
+test('activity names the note state without treating a pre-broadcast deposit hash as a claim', () => {
+  const depositHash = `0x${'a'.repeat(64)}` as const
+  const html = render({}, true, { ...data, activity: [
+    { kind: 'spending', txHash: depositHash },
+    { kind: 'spent', txHash: `0x${'b'.repeat(64)}` },
+  ] })
+  assert.match(html, /Payment in progress<\/strong><small>Preparing payment/)
+  assert.match(html, /Private note spent<\/strong><small>Tx · 0xbbbbbbbb/)
+  assert.doesNotMatch(html, /0xaaaaaaaa/)
+})
