@@ -60,6 +60,7 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
   const [selectedImportedClaim, setSelectedImportedClaim] = useState<Address | null>(null)
   const [copied, setCopied] = useState(false)
   const [fundingAddressCopied, setFundingAddressCopied] = useState(false)
+  const [fundingRequestStatus, setFundingRequestStatus] = useState('')
   const [checkingHash, setCheckingHash] = useState<Address | null>(null)
   const [recoveryStatus, setRecoveryStatus] = useState('')
   const viewGate = useRef(new WalletViewGate())
@@ -134,6 +135,24 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
     } catch (cause) {
       setRecoveryStatus(`Could not verify ${short(hash)}: ${cause instanceof Error ? cause.message : String(cause)}. The note remains reserved.`)
     } finally { setCheckingHash(null) }
+  }
+  const requestDevnetFunds = async () => {
+    if (!api.requestDevnetFunds || !connectionReady || nymPaymentUnavailable) return
+    const ticket = viewGate.current.beginOperation()
+    if (!ticket) return
+    setBusy(true); setError(''); setFundingRequestStatus('Requesting devnet ETH and waiting for the faucet transaction.')
+    try {
+      const hash = await api.requestDevnetFunds()
+      if (viewGate.current.isCurrent(ticket)) {
+        setFundingRequestStatus(`Faucet transaction included: ${short(hash)}. Checking your balance.`)
+        refresh()
+      }
+    } catch (cause) {
+      if (viewGate.current.isCurrent(ticket)) {
+        setFundingRequestStatus('')
+        setError(`Faucet request failed: ${cause instanceof Error ? cause.message : String(cause)}. Refresh the balance before requesting again.`)
+      }
+    } finally { if (viewGate.current.finish(ticket)) setBusy(false) }
   }
   const importClaim = async () => {
     if (!connectionReady || busy || !window.location.hash.startsWith('#claim=')) return
@@ -222,6 +241,8 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
             <p>This is a signed maximum. Actual gas may cost less.</p>
           </div>
           {depositStatus.shortfallWei > 0n && <p className="px-funding-shortfall" role="status">Add at least {formatEth(depositStatus.shortfallWei, 18)} devnet ETH to the address above.</p>}
+          {depositStatus.shortfallWei > 0n && api.requestDevnetFunds && <button type="button" className="px-button px-button-secondary" disabled={busy || !connectionReady || nymPaymentUnavailable} onClick={() => void requestDevnetFunds()}>Request 1 devnet ETH</button>}
+          {fundingRequestStatus && <p role="status">{fundingRequestStatus}</p>}
           {depositStatus.reason && depositStatus.shortfallWei === 0n && <p role="status">{depositStatus.reason}</p>}
           {(dataErrors.publicBalance || dataErrors.activity) && <button type="button" className="px-button px-button-secondary" disabled={!connectionReady || busy} onClick={refresh}>Retry funding check</button>}
           {review && <div className="px-review"><h2>Review deposit</h2><div><span>Private balance receives</span><strong>{count} encrypted {count === 1 ? 'note' : 'notes'}</strong></div><p>Anyone can see the public deposit. A later claim can be linked by timing or a small anonymity set.</p></div>}

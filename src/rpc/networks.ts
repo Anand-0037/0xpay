@@ -2,6 +2,7 @@ export type PrivacyNetwork = 'nym' | 'nox'
 export type ChainNetwork = 'devnet' | 'local'
 export const APP_RPC_URL = 'https://altmempool.forshtat.com'
 export const MEMPOOL_RPC_URL = 'https://altmempool.forshtat.com/rpc'
+export const FAUCET_RPC_URL = 'https://altmempoolgateway.forshtat.com/rpc'
 export const LOCAL_RPC_URL = import.meta.env?.VITE_LOCAL_RPC_URL || 'http://127.0.0.1:10545'
 export const LOCAL_MEMPOOL_URL = import.meta.env?.VITE_LOCAL_MEMPOOL_URL || 'http://127.0.0.1:13000/rpc'
 export const PRIVACY_NETWORKS = {

@@ -1,5 +1,5 @@
 // Page fetch/XHR guard. Worker traffic is outside this page and counted by PrivateRpc.
-import { APP_RPC_URL, LOCAL_RPC_URL, LOCAL_MEMPOOL_URL, MEMPOOL_RPC_URL, PRIVACY_NETWORKS, workerBootstrapParams, type PrivacyNetwork } from '../rpc/networks.ts'
+import { APP_RPC_URL, FAUCET_RPC_URL, LOCAL_RPC_URL, LOCAL_MEMPOOL_URL, MEMPOOL_RPC_URL, PRIVACY_NETWORKS, workerBootstrapParams, type PrivacyNetwork } from '../rpc/networks.ts'
 export type TrafficKind = 'app-static' | 'bootstrap' | 'worker-bundle' | 'artifacts' | 'blocked'
 export type TrafficEntry = Readonly<{ kind: TrafficKind; host: string; outcome: 'sent' | 'failed' | 'blocked' }>
 const counts = new Map<TrafficKind, number>()
@@ -19,7 +19,7 @@ export function classifyOutgoingRequest(raw: string, method: string, body: unkno
   if (url.origin === appOrigin && method.toUpperCase() === 'GET' && !url.search) return 'app-static'
   if (url.href === new URL(PRIVACY_NETWORKS[privacyNetwork].bootstrapRpc).href) return method.toUpperCase() === 'POST' && validBootstrap(body, privacyNetwork) ? 'bootstrap' : 'blocked'
   if (resolvers.has(url.href) && method.toUpperCase() === 'GET') return 'worker-bundle'
-  if ([APP_RPC_URL, MEMPOOL_RPC_URL, 'https://altmempool.forshtat.com/rpc', LOCAL_RPC_URL, LOCAL_MEMPOOL_URL].includes(url.href)) return 'blocked'
+  if ([APP_RPC_URL, MEMPOOL_RPC_URL, FAUCET_RPC_URL, LOCAL_RPC_URL, LOCAL_MEMPOOL_URL].includes(url.href)) return 'blocked'
   return 'blocked'
 }
 export function installNetworkGuard({ privacyNetwork = 'nym' }: { privacyNetwork?: PrivacyNetwork } = {}) {

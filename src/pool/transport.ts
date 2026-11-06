@@ -1,5 +1,5 @@
 import type { PrivateRpc } from '../rpc.ts'
-import { APP_RPC_URL, LOCAL_RPC_URL, MEMPOOL_RPC_URL, LOCAL_MEMPOOL_URL } from '../rpc/networks.ts'
+import { APP_RPC_URL, FAUCET_RPC_URL, LOCAL_RPC_URL, MEMPOOL_RPC_URL, LOCAL_MEMPOOL_URL } from '../rpc/networks.ts'
 import type { RpcTransport } from './index.ts'
 
 // The Nym exit currently drops Content-Type on requests to the alt-mempool
@@ -27,8 +27,10 @@ function targetFor(route: PrivateRpc, url: string, body: unknown): string {
 /** Every application JSON-RPC request passes through the selected Anon-RPC worker. */
 export function privateTransport(route: PrivateRpc): RpcTransport {
   return async (url, body) => {
-    const allowed = route.chain === 'local' ? [LOCAL_RPC_URL, LOCAL_MEMPOOL_URL] : [APP_RPC_URL, MEMPOOL_RPC_URL, 'https://altmempool.forshtat.com/rpc']
+    const allowed = route.chain === 'local' ? [LOCAL_RPC_URL, LOCAL_MEMPOOL_URL] : [APP_RPC_URL, MEMPOOL_RPC_URL, FAUCET_RPC_URL]
     if (!allowed.includes(url)) throw new Error(`Unsupported RPC destination: ${url}`)
+    if (url === FAUCET_RPC_URL && (!body || typeof body !== 'object' || Array.isArray(body) || !('method' in body) || !['skandha_explorer_faucet', 'eth_getTransactionReceipt'].includes(String(body.method))))
+      throw new Error('Unsupported faucet RPC method')
     const response = await route.fetchRpc(JSON.stringify(body), targetFor(route, url, body))
     return response.json()
   }

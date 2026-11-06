@@ -7,6 +7,7 @@ export function adaptPoolApi(pool: PoolApi): PayApi {
   const address = () => unlockedFundingWallet().address as `0x${string}`
   return {
     getFundingAddress: address,
+    requestDevnetFunds: pool.requestDevnetFunds,
     getPublicBalance: () => pool.getPublicBalance(address()),
     getPrivateBalance: () => pool.getPrivateBalance(),
     listNotes: async () => (await pool.listNotes()).map(entry => ({ commitment: entry.note.commitment, spent: entry.status !== 'unspent', source: entry.source })),

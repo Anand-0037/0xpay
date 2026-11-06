@@ -4,6 +4,7 @@ import * as snarkjs from 'snarkjs';
 import { decodeFunctionResult, encodeFunctionData, isAddress, keccak256, parseAbiItem, toHex, zeroAddress, type Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import deployment from './deployments.devnet.json';
+import { FAUCET_RPC_URL } from '../rpc/networks.ts';
 import { rpc, sleep, sponsoredTx, rawFrame, wireFrame } from './network.ts';
 import type { FrameTx } from '@forshtat/hegota-support/tx';
 import { assertReturnedHash, broadcastPrepared, depositEvent, isCanonicalPolicyRejection, NOTE_VALUE, verifyClaimReceipt, verifyDepositReceipt, verifyNativePayout, type ClaimIntent, type DepositIntent, type PaymentReceipt, type PreparedPayment } from './payment-records.ts';
@@ -84,13 +85,15 @@ export async function syncDeposits(pool: Hex, transport?: RpcTransport): Promise
 export async function getBalance(address: Hex, transport?: RpcTransport): Promise<bigint> {
   return BigInt(await rpc<Hex>(config.mempoolRpc, 'eth_getBalance', [address, 'latest'], transport));
 }
-export async function faucet(address: Hex, transport?: RpcTransport): Promise<void> {
-  const result = await rpc<{ txHash: Hex }>(config.mempoolRpc, 'skandha_explorer_faucet', [address], transport);
-  await waitReceipt(result.txHash, transport);
+export async function faucet(address: Hex, transport?: RpcTransport): Promise<Hex> {
+  const result = await rpc<{ txHash: Hex }>(FAUCET_RPC_URL, 'skandha_explorer_faucet', [address], transport);
+  if (!/^0x[0-9a-f]{64}$/i.test(result?.txHash ?? '')) throw new Error('Faucet did not return a transaction hash; refresh the balance before requesting again');
+  await waitReceipt(result.txHash, transport, FAUCET_RPC_URL);
+  return result.txHash;
 }
-async function waitReceipt(hash: Hex, transport?: RpcTransport): Promise<PaymentReceipt> {
+async function waitReceipt(hash: Hex, transport?: RpcTransport, endpoint = config.mempoolRpc): Promise<PaymentReceipt> {
   for (let i = 0; i < 90; i++) {
-    const receipt = await rpc<PaymentReceipt | null>(config.mempoolRpc, 'eth_getTransactionReceipt', [hash], transport);
+    const receipt = await rpc<PaymentReceipt | null>(endpoint, 'eth_getTransactionReceipt', [hash], transport);
     if (receipt) {
       assertReturnedHash(receipt.transactionHash, hash);
       if (receipt.status !== '0x1') throw new Error(`Transaction reverted: ${hash}`);

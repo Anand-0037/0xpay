@@ -15,6 +15,7 @@ export type ClaimStep =
 
 export type PayApi = {
   getFundingAddress?(): Address
+  requestDevnetFunds?(): Promise<Address>
   getPublicBalance(): Promise<bigint>
   getPrivateBalance(): Promise<bigint>
   listNotes(): Promise<Note[]>

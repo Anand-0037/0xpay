@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { privateTransport } from '../src/pool/transport.ts'
-import { APP_RPC_URL, MEMPOOL_RPC_URL } from '../src/rpc/networks.ts'
+import { APP_RPC_URL, FAUCET_RPC_URL, MEMPOOL_RPC_URL } from '../src/rpc/networks.ts'
 import type { PrivateRpc } from '../src/rpc.ts'
 test('transport delegates JSON-RPC to the private worker and rejects unknown destinations', async () => {
   const bodies: string[] = []
@@ -29,4 +29,17 @@ test('Nym routes only standard devnet reads to the root through the worker', asy
   await send(MEMPOOL_RPC_URL, { jsonrpc: '2.0', id: 1, method: 'skandha_config', params: [] })
   await send(MEMPOOL_RPC_URL, [{ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }])
   assert.deepEqual(targets.slice(5), [MEMPOOL_RPC_URL, MEMPOOL_RPC_URL, MEMPOOL_RPC_URL])
+})
+
+test('faucet gateway accepts only faucet and receipt requests through the worker', async () => {
+  const targets: string[] = []
+  const route = { chain: 'devnet', network: 'nox', fetchRpc: async (_body: string, target: string) => {
+    targets.push(target)
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: null }))
+  } } as PrivateRpc
+  const send = privateTransport(route)
+  await send(FAUCET_RPC_URL, { method: 'skandha_explorer_faucet', params: [] })
+  await send(FAUCET_RPC_URL, { method: 'eth_getTransactionReceipt', params: [] })
+  await assert.rejects(send(FAUCET_RPC_URL, { method: 'eth_sendRawTransaction', params: [] }), /Unsupported faucet RPC method/)
+  assert.deepEqual(targets, [FAUCET_RPC_URL, FAUCET_RPC_URL])
 })

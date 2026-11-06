@@ -1,5 +1,5 @@
 import { encodeFunctionData, isAddress, keccak256, toHex, type Hex } from 'viem'
-import { claim, config, confirmClaimPayment, hash, createNote, deposit, encodeNoteLink, decodeNoteLink, getBalance, type ClaimStep, type Note, type RpcTransport } from './index.ts'
+import { claim, config, confirmClaimPayment, hash, createNote, deposit, encodeNoteLink, decodeNoteLink, faucet, getBalance, type ClaimStep, type Note, type RpcTransport } from './index.ts'
 import { rpc } from './network.ts'
 import { assertNoteSession, captureNoteSession, listStoredNotes, mutateStoredNotes, reconcileNotes, withClaimReservation, type StoredNote, type NoteSession } from './notes.ts'
 import { unlockedFundingWallet } from '../wallet/lifecycle.ts'
@@ -22,6 +22,10 @@ export function createPoolApi(route: PrivateRpc) {
   }
   const api = {
     getPublicBalance: (address: Hex) => getBalance(address, transport),
+    requestDevnetFunds: () => {
+      const session = captureNoteSession()
+      return faucet(unlockedFundingWallet().address as Hex, sessionTransport(session))
+    },
     getPrivateBalance: async () => BigInt(activeNotes(await reconcileNotes(transport)).filter(x => x.status === 'unspent').length) * DENOMINATION,
     listNotes: async () => activeNotes(await reconcileNotes(transport)),
     exportNoteBackup: exportPrivateNoteBackup,
