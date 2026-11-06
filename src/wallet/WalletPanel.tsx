@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { RecoveryPhraseInput } from './RecoveryPhraseInput.tsx'
 import { confirmWalletBackup, createLocalWallet, hasStoredVault, importLocalWallet, lockLocalWallet, unlockLocalWallet, type WalletSession } from './lifecycle.ts'
 
 export function WalletPanel({ session, onSession, blockNumber, children }: { session: WalletSession | null; onSession: (session: WalletSession | null) => void; blockNumber: number | null; children?: React.ReactNode }) {
@@ -47,8 +48,8 @@ export function WalletPanel({ session, onSession, blockNumber, children }: { ses
           setPassword(''); setPhrase('')
         } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) } finally { setBusy(false) }
       }}>
-        {mode === 'import' && <label>Recovery phrase<textarea value={phrase} onChange={event => setPhrase(event.target.value)} required autoComplete="off" /></label>}
-        <label>Password<input type="password" value={password} onChange={event => setPassword(event.target.value)} minLength={12} required autoComplete={mode === 'unlock' ? 'current-password' : 'new-password'} /></label>
+        {mode === 'import' && <RecoveryPhraseInput onChange={setPhrase} disabled={busy} />}
+        <label>Password <small>At least 12 characters</small><input type="password" value={password} onChange={event => setPassword(event.target.value)} minLength={12} required autoComplete={mode === 'unlock' ? 'current-password' : 'new-password'} /></label>
         <button className="primary" type="submit" disabled={busy}>{busy ? 'Working…' : mode === 'unlock' ? 'Unlock wallet' : mode === 'import' ? 'Import wallet' : 'Create wallet'}</button>
       </form>
       {error && <p className="wallet-error" role="alert">{error}</p>}
