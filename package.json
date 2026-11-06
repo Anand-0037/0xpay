@@ -17,7 +17,7 @@
     "@forshtat/hegota-support": "^0.0.1",
     "buffer": "6.0.3",
     "circomlibjs": "^0.1.7",
-    "ethers": "6.14.3",
+    "ethers": "6.17.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "snarkjs": "^0.7.6",
@@ -36,5 +36,9 @@
     "typescript": "~7.0.2",
     "vite": "^8.3.6",
     "vite-plugin-node-polyfills": "0.28.0"
+  },
+  "overrides": {
+    "underscore": "1.13.8",
+    "ws": "8.22.1"
   }
 }
