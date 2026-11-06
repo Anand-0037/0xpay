@@ -59,3 +59,5 @@ Recovery words restore the funding account, but they do **not** reconstruct rand
 This is unaudited devnet software using a development trusted setup and draft ERC-8421 frame transactions. Do not use it with real funds. The design reuses the established fixed-note pool pattern, Poseidon and Groth16 tooling from Circom/SnarkJS, the Hegota support package, Anon-RPC's browser harness, and Kazuhiko Arase's MIT-licensed QR generator (license header preserved in `src/pay/vendor/qrcode.mjs`). AI tools assisted with planning, implementation, tests, and copy; project-specific source and design provenance must be disclosed in the hackathon submission.
 
 The earlier RAILGUN and paper Polymarket work remains in Git history and the separate `work/polymarket-agents` branch. It is not part of this wallet build.
+
+See [provenance and AI assistance](docs/PROVENANCE.md) for the starting point, current Classic-track eligibility question and assisted areas.
