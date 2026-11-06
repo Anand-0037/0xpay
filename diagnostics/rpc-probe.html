@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>0xPay · Local read-only RPC diagnosis</title>
+    <style>
+      :root { color-scheme: light; font: 16px/1.5 system-ui, sans-serif; color: #25231e; background: #faf7ef; }
+      body { max-width: 1120px; margin: 36px auto; padding: 0 20px; }
+      h1 { font-size: 28px; line-height: 1.2; }
+      p { max-width: 82ch; }
+      button { font: inherit; padding: 10px 15px; border: 1px solid #9a7758; border-radius: 8px; background: white; color: inherit; cursor: pointer; }
+      button:disabled { cursor: wait; opacity: .55; }
+      button:focus-visible { outline: 3px solid #b3471b; outline-offset: 3px; }
+      .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 24px 0; }
+      .table-wrap { overflow-x: auto; }
+      table { border-collapse: collapse; width: 100%; background: white; font-size: 14px; }
+      th, td { text-align: left; padding: 10px; border: 1px solid #ddd3c5; vertical-align: top; }
+      code, pre { font-family: ui-monospace, monospace; font-size: 13px; }
+      pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #eee8dd; padding: 16px; border-radius: 8px; }
+      #stage { min-height: 1.5em; font-weight: 600; }
+      .note { padding: 12px; border-left: 3px solid #bd4d20; }
+    </style>
+  </head>
+  <body>
+    <h1>Read-only dashboard request diagnosis</h1>
+    <p class="note">Local diagnostic entry, not a wallet screen. Uses the selected Anon-RPC worker (Nox by default; ?network=nym selects Nym) and public devnet only. No wallet, password, storage, signing, faucet or transaction submission.</p>
+    <p>Balance queries use only <code>0x0000000000000000000000000000000000000000</code>. Pool log queries are global public deposit events. Sequential mode isolates the first failing method; dashboard mode starts the initial reads together and runs the token reads in order.</p>
+    <div class="controls">
+      <button id="sequential" type="button">Run sequential reads</button>
+      <button id="dashboard" type="button">Run dashboard request graph</button>
+      <button id="disconnect" type="button">Disconnect worker</button>
+    </div>
+    <p id="stage" role="status" aria-live="polite">No probe has run.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Read</th><th>Endpoint</th><th>Outcome</th><th>Elapsed</th><th>Route afterward</th><th>Sanitized result / error</th></tr></thead>
+        <tbody id="results"></tbody>
+      </table>
+    </div>
+    <h2>Transport counters</h2>
+    <p>Completed means the worker delivered an HTTP response. A JSON-RPC application error can still be a completed transport response.</p>
+    <pre id="counters">Not started.</pre>
+    <script type="module" src="./rpc-probe.ts"></script>
+  </body>
+</html>
