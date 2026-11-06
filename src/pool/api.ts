@@ -259,6 +259,7 @@ export function createPayApi(route: PrivateRpc): import('../pay/types.ts').PayAp
   const address = () => unlockedFundingWallet().address as Hex
   return {
     getFundingAddress: address,
+    requestDevnetFunds: core.requestDevnetFunds,
     getPublicBalance: () => core.getPublicBalance(address()),
     getPrivateBalance: core.getPrivateBalance,
     listNotes: async () => (await core.listNotes()).map(x => ({ commitment: x.note.commitment, spent: x.status !== 'unspent', status: x.status, source: x.source })),

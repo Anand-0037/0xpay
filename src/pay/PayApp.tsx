@@ -146,7 +146,7 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
     try {
       const hash = await api.requestDevnetFunds()
       if (viewGate.current.isCurrent(ticket)) {
-        setFundingRequestStatus(`Faucet transaction included: ${short(hash)}. Checking your balance.`)
+        setFundingRequestStatus(`Faucet transaction included: ${short(hash)}.`)
         refresh()
       }
     } catch (cause) {

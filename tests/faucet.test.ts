@@ -2,9 +2,16 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { faucet, type RpcTransport } from '../src/pool/index.ts'
 import { FAUCET_RPC_URL } from '../src/rpc/networks.ts'
+import { createPayApi } from '../src/pool/api.ts'
+import type { PrivateRpc } from '../src/rpc.ts'
 
 const address = '0x1111111111111111111111111111111111111111'
 const txHash = `0x${'a'.repeat(64)}`
+
+test('wallet API exposes the devnet faucet action', () => {
+  const api = createPayApi({} as PrivateRpc)
+  assert.equal(typeof api.requestDevnetFunds, 'function')
+})
 
 test('devnet faucet requests funds through the injected transport and waits for an included receipt', async () => {
   const calls: { url: string; method: string; params: unknown[] }[] = []
