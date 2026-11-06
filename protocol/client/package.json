@@ -1,0 +1,27 @@
+{
+  "name": "@oxpay/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx ../scripts/smoke.ts",
+    "deploy": "tsx ../scripts/deploy.ts",
+    "demo": "tsx ../scripts/demo.ts"
+  },
+  "dependencies": {
+    "@forshtat/hegota-support": "*",
+    "circomlibjs": "*",
+    "snarkjs": "*",
+    "viem": "*"
+  },
+  "devDependencies": {
+    "@types/node": "*",
+    "@types/snarkjs": "*",
+    "tsx": "*",
+    "typescript": "*",
+    "vite-plugin-node-polyfills": "^0.28.0",
+    "vitest": "*"
+  }
+}

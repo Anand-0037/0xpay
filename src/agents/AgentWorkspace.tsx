@@ -79,7 +79,7 @@ function AgentWorkspaceForRoute({ route, routeGeneration, onReconnect }: Props) 
   const watchEpoch = useRef(0)
   const market = markets.find(item => item.id === selectedId) ?? null
   const selectedToken = market?.outcomes[outcomeIndex]?.tokenId
-  const book = bookResult?.tokenId === selectedToken && bookResult.book.market === market ? bookResult.book : null
+  const book = bookResult && bookResult.tokenId === selectedToken && bookResult.book.market === market ? bookResult.book : null
   const privateReady = route?.status === 'ready' && routeCheck?.route === route && routeCheck.generation === routeGeneration
 
   useEffect(() => {

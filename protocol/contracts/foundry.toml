@@ -1,0 +1,10 @@
+[profile.default]
+src = "src"
+out = "out"
+test = "test"
+solc_version = "0.8.28"
+via_ir = true
+evm_version = "cancun"
+ffi = true
+fs_permissions = [{ access = "read", path = "../circuits/build" }, { access = "read", path = "artifacts" }]
+remappings = ["@forshtat/hegota-support/=node_modules/@forshtat/hegota-support/"]

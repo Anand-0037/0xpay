@@ -1,7 +1,7 @@
 import { AnonRpcWorker } from '@anon-rpc/browser-harness'
 import { AbiCoder } from 'ethers'
 import { setWorkerBundleResolvers } from './net/network-guard.ts'
-import { APP_RPC_URL, AGENT_RPC_URL, PRIVACY_NETWORKS, workerBootstrapParams, type PrivacyNetwork } from './rpc/networks.ts'
+import { APP_RPC_URL, LOCAL_RPC_URL, LOCAL_MEMPOOL_URL, PRIVACY_NETWORKS, workerBootstrapParams, type PrivacyNetwork, type ChainNetwork } from './rpc/networks.ts'
 export { APP_RPC_URL, PRIVACY_NETWORKS, privacyNetworkFromSearch, type PrivacyNetwork } from './rpc/networks.ts'
 
 const WORKER_RESOLVERS_SELECTOR = '0x1c67ff29'
@@ -26,7 +26,7 @@ const COUNTED_METHODS = new Set([
   'eth_getBlockByNumber', 'eth_getBlockByHash', 'eth_getTransactionByHash',
   'eth_getTransactionReceipt', 'eth_getTransactionCount', 'eth_gasPrice',
   'eth_maxPriorityFeePerGas', 'eth_feeHistory', 'eth_estimateGas',
-  'net_version', 'web3_clientVersion', 'eth_sendRawTransaction',
+  'net_version', 'web3_clientVersion', 'eth_sendRawTransaction', 'eth_sendFrameTransaction', 'eth_estimateFrameTransactionGas', 'ethrex_simulateFrameTransaction', 'skandha_frameTransactionStatus',
 ])
 
 function countedMethods(body: string | Uint8Array): string[] {
@@ -63,7 +63,7 @@ async function bootstrapRequest(value: unknown, network: PrivacyNetwork) {
 
 export class PrivateRpc {
   readonly network: PrivacyNetwork
-  readonly chain: 'sepolia' | 'polygon-readonly'
+  readonly chain: ChainNetwork
   readonly rpcUrl: string
   private readonly workerFactory: WorkerFactory
   private worker: Worker
@@ -76,11 +76,11 @@ export class PrivateRpc {
   private bootstrapReads = 0
   private methodCounts = new Map<string, { attempted: number; completed: number; failed: number }>()
   private resolverUrls = new Set<string>()
-  constructor(workerFactory?: WorkerFactory, network: PrivacyNetwork = 'nym', chain: 'sepolia' | 'polygon-readonly' = 'sepolia') {
-    if (chain !== 'sepolia' && chain !== 'polygon-readonly') throw new Error('Unsupported private RPC chain')
+  constructor(workerFactory?: WorkerFactory, network: PrivacyNetwork = 'nym', chain: ChainNetwork = 'devnet') {
+    if (chain !== 'devnet' && chain !== 'local') throw new Error('Unsupported private RPC chain')
     this.network = network
     this.chain = chain
-    this.rpcUrl = chain === 'polygon-readonly' ? AGENT_RPC_URL : APP_RPC_URL
+    this.rpcUrl = chain === 'local' ? LOCAL_RPC_URL : APP_RPC_URL
     this.workerFactory = workerFactory ?? ((onBootstrap) => new AnonRpcWorker({
       address: PRIVACY_NETWORKS[network].specifier, preExisting: { rpcProvider: { request: async (payload: { method: string; params?: unknown[] }) => {
         const result = await bootstrapRequest(payload, network)
@@ -127,7 +127,7 @@ export class PrivateRpc {
       if (generation !== this.generation) throw new Error('Private RPC connection was replaced')
       const chainId = await this.readHex('eth_chainId')
       if (generation !== this.generation) throw new Error('Private RPC connection was replaced')
-      if (chainId.toLowerCase() !== (this.chain === 'polygon-readonly' ? '0x89' : '0xaa36a7')) throw new Error(`Unexpected chain ${chainId}`)
+      if (BigInt(chainId) !== (this.chain === 'local' ? BigInt(import.meta.env?.VITE_LOCAL_CHAIN_ID || '9') : 1337n)) throw new Error(`Unexpected chain ${chainId}`)
       const blockNumber = Number.parseInt(await this.readHex('eth_blockNumber'), 16)
       if (generation !== this.generation) throw new Error('Private RPC connection was replaced')
       this.statusValue = 'ready'
@@ -173,17 +173,8 @@ export class PrivateRpc {
       counts[outcome]++
     }
   }
-  async fetchRpc(body: string | Uint8Array): Promise<Response> {
+  async fetchRpc(body: string | Uint8Array, targetUrl: string = this.rpcUrl): Promise<Response> {
     if (this.statusValue !== 'ready' && this.statusValue !== 'connecting') throw new Error('Private RPC route needs reconnecting')
-    if (this.chain === 'polygon-readonly') {
-      const value: unknown = JSON.parse(typeof body === 'string' ? body : new TextDecoder().decode(body))
-      const calls: unknown[] = Array.isArray(value) ? value : [value]
-      const allowed = new Set(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getBalance', 'eth_getCode', 'eth_call'])
-      if (!calls.length || calls.length > 32 || calls.some(call => !call || typeof call !== 'object' ||
-        !('method' in call) || typeof call.method !== 'string' || !allowed.has(call.method))) {
-        throw new Error('The agent Polygon connection permits read-only RPC methods only')
-      }
-    }
     const generation = this.generation
     const worker = this.worker
     const methods = countedMethods(body)
@@ -194,7 +185,9 @@ export class PrivateRpc {
     try {
       const response = await Promise.race([
         (async () => {
-          const result = await worker.fetch(this.rpcUrl, {
+          const allowedUrls = this.chain === 'local' ? [this.rpcUrl, LOCAL_MEMPOOL_URL] : [this.rpcUrl, 'https://altmempoolgateway.forshtat.com/rpc', 'https://altmempool.forshtat.com/rpc']
+          if (!allowedUrls.includes(targetUrl)) throw new Error('Unapproved worker RPC target')
+          const result = await worker.fetch(targetUrl, {
             method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
             body: typeof body === 'string' ? body : new Uint8Array(body).buffer,
           })

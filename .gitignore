@@ -38,3 +38,7 @@ test-results/
 hack/
 STATUS.md
 BLOCKERS.md
+# Protocol deployment secrets
+protocol/deployments/.deployer-key
+protocol/deployments/identity.json
+protocol/deployments/jwt.hex

@@ -5,25 +5,25 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run check:core && vite build",
     "lint": "oxlint",
     "test": "tsx --tsconfig tsconfig.app.json --test tests/*.test.ts",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "check:core": "tsc --ignoreConfig --noEmit --target es2023 --module esnext --moduleResolution bundler --jsx react-jsx --allowImportingTsExtensions --skipLibCheck --types vite/client --strict --noUnusedLocals --noUnusedParameters src/main.tsx src/pool/circomlibjs.d.ts"
   },
   "dependencies": {
     "@anon-rpc/browser-harness": "^0.4.0",
-    "@railgun-community/shared-models": "8.0.1",
-    "@railgun-community/wallet": "10.9.0",
-    "abstract-leveldown": "7.2.0",
+    "@forshtat/hegota-support": "^0.0.1",
     "buffer": "6.0.3",
+    "circomlibjs": "^0.1.7",
     "ethers": "6.14.3",
-    "level-js": "6.1.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "snarkjs": "0.7.6"
+    "snarkjs": "^0.7.6",
+    "viem": "^2.57.16"
   },
   "devDependencies": {
-    "@types/level-js": "4.0.5",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -35,7 +35,6 @@
     "tsx": "^4.23.15",
     "typescript": "~7.0.2",
     "vite": "^8.3.6",
-    "vite-plugin-node-polyfills": "0.28.0",
-    "@types/abstract-leveldown": "7.2.5"
+    "vite-plugin-node-polyfills": "0.28.0"
   }
 }

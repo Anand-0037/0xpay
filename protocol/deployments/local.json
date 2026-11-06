@@ -1,0 +1,12 @@
+{
+  "chainId": 1337,
+  "ethrexRpc": "http://127.0.0.1:10545",
+  "mempoolRpc": "http://127.0.0.1:13000/rpc",
+  "explorer": "http://127.0.0.1:13000/",
+  "pool": "0xdbb91e4a4ef3c6006609ec3493ffc7a62a40e627",
+  "poseidon": "0x56ec23ac7dbae95409f8b666163315f771621754",
+  "verifier": "0x422d5d95625a4c0b97e9a7585d48b3d48e253bd8",
+  "registry": "0x29c7a2c7fff502a32f7709218418908fdea00fd5",
+  "deployer": "0xF68a4276E37a38849F9971DAf310a05729Dd1942",
+  "deployHash": "0x3dfacd10bd0a9087cfcfe80776a8a8cbf7eb273cf74d21f5d106ce7462b2439c"
+}

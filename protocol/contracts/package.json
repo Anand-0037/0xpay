@@ -1,0 +1,14 @@
+{
+  "name": "0xpay-contracts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "forge build && node scripts/export-artifacts.mjs",
+    "test": "forge test",
+    "gas": "forge test --gas-report"
+  },
+  "dependencies": {
+    "@forshtat/hegota-support": "0.0.1",
+    "circomlibjs": "^0.1.7"
+  }
+}

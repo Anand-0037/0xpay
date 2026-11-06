@@ -1,32 +1,39 @@
 # 0xPay
 
-A browser privacy wallet with Anon-RPC enabled by default.
+0xPay is a devnet privacy wallet for fixed 0.1 ETH notes. Deposit into a Poseidon Merkle pool, then send to an address from a fresh zero-balance frame sender. A staked pool checks a Groth16 proof, sponsors the frame transaction, and pays the recipient from the note. The recipient needs no ETH or interaction. The pool needs an ETH gas float and deducts a claim fee from each note.
 
-RAILGUN supplies shielded balances and payments. Anon-RPC routes supported blockchain requests through an anonymizing worker. If that route fails, protected requests stop instead of switching to direct RPC. Keys are encrypted locally in the browser.
+The browser opens on a dashboard with public balance, locally encrypted private notes, token balances, and activity. It offers private send, payment links, and a step-by-step transaction view. Application RPC calls use the Nox Anon-RPC worker by default and stop if that route fails. The worker's bootstrap lookup and page/artifact downloads are separate network paths.
 
-## Run
+## Run the wallet
 
-Node 24:
+Use Node 24 and the checked-in lockfile:
 
 ```sh
-npm ci
+npm ci --ignore-scripts
 npm run dev
 ```
 
-Checks: `npm run lint`, `npm test`, `npm run build`.
+Checks: `npm run typecheck`, `npm test`, `npm run lint`, `npm run build`. The current browser target is the public alt-mempool devnet, chain 1337. `?chain=local` is intentionally ignored because Nox requires a reachable HTTPS endpoint and cannot tunnel to a local HTTP sidecar. Local integration is exercised through the CLI in `protocol/`.
 
-## What works and what still needs proof
+## Protocol source
 
-A real Sepolia shield and spendable sender balance have been observed. A complete private payment with independently confirmed recipient spendability remains unverified. Preserve the original wallet and recovery words; do not treat this prototype as a production wallet.
+- `protocol/circuits/`: Circom withdrawal circuit, local development setup, proof tests, and the verifier patch that replaces banned dynamic `GAS` calls with fixed precompile limits.
+- `protocol/contracts/`: `OxPayPool`, Groth16 verifier, Foundry tests, and deployable artifacts.
+- `protocol/client/` and `protocol/scripts/`: frame transaction builder, preflight, deployment, demo, and negative-control scripts.
+- `public/circuits/`: browser proving artifacts. Do not use these keys for real funds.
 
-## Prediction-market extension
+For a protocol rebuild, install each subpackage with `npm ci --ignore-scripts`, run `protocol/circuits/build.sh`, then `npm run build` and `forge test -vv --gas-report` in `protocol/contracts`, and `npm run typecheck`/`npm test` in `protocol/client`. The circuit build needs its documented Circom/SnarkJS toolchain. The deployment script writes a new throwaway key under `protocol/deployments/.deployer-key`; keep it private and never commit it.
 
-The `work/polymarket-agents` branch adds a separate Agents entry. Its target is real market data → cited researcher → skeptical review → local risk checks → user review and a labelled paper result. Wallet creation and signing stay user-controlled. Live venue access, model-driven research and end-to-end agent behavior require separate verification; the wallet is not replaced.
+## Evidence and current limit
 
-## Privacy boundaries
+The [public devnet evidence](protocol/EVIDENCE.md) records the deployed/staked pool, deposit, a successful exact-signed ethrex simulation of all three claim frames, and canonical mempool rejection above its 100,000 validation-gas limit. The public alternative sidecar rejected the claim because its precompile allowlist was empty, so **there is no public included Groth16 claim yet**.
 
-Anon-RPC reduces direct IP/query linkage at the RPC endpoint. It does not hide public transactions or positions, prove that RPC data is honest, or make authenticated venue orders anonymous. Bootstrap, worker downloads and the wallet's POI/indexer/proof services have separate network paths. Market APIs and hosted AI tools must be accounted for separately. RAILGUN funds are not automatically Polymarket collateral.
+A separate local sidecar configured with BN254 precompiles admitted and included claim `0xaa61ab27648734771229378ca370e36c774b1c8a4cbded9cf0ecc0b3a9b42ebb` (local block 198, type 6, receipt status success). Replay, recipient tampering, wrong root, and wrong second frame were rejected in local negative controls. This local CLI used direct loopback RPC, not Anon-RPC. The browser route was separately observed reaching public devnet chain 1337 through Nox; an end-to-end browser deposit and claim remains unverified.
 
-Built with React, TypeScript, ethers, the RAILGUN Wallet SDK and the Anon-RPC browser harness. Existing protocol and network implementations are reused; 0xPay supplies the interface, transport enforcement and recovery logic.
+## Privacy and safety
 
-[Anon-RPC](https://ethereum.github.io/anon-rpc/wallets/) · [RAILGUN SDK](https://docs.railgun.org/developer-guide) · [Source](https://github.com/Anand-0037/0xpay)
+The deposit amount and transaction are public. A claim's recipient and payout are public. Deposit-to-claim linkage is obscured only within the pool's anonymity set; small pools, timing, and fixed denominations still leak context. Anon-RPC hides the browser's IP from the RPC for routed calls, but the RPC still sees request contents. A payment link is a bearer secret in a URL fragment: anyone who receives it can claim the note. The link-claim payout goes to the receiver's unlocked wallet; a fresh zero-ETH key submits the frame.
+
+This is unaudited devnet software using a development trusted setup and draft ERC-8421 frame transactions. Do not use it with real funds. The design reuses the established fixed-note pool pattern, Poseidon and Groth16 tooling from Circom/SnarkJS, the Hegota support package, Anon-RPC's browser harness, and Kazuhiko Arase's MIT-licensed QR generator (license header preserved in `src/pay/vendor/qrcode.mjs`). AI tools assisted with planning, implementation, tests, and copy; project-specific source and design provenance must be disclosed in the hackathon submission.
+
+The earlier RAILGUN and paper Polymarket work remains in Git history and the separate `work/polymarket-agents` branch. It is not part of this wallet build.
