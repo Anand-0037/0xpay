@@ -77,9 +77,10 @@ export function ConnectionDetails({ open, route, traffic, onClose, onReconnect, 
         <p>Switching reloads the private connection.</p>
       </div>}
       <p id="connection-explanation">Your wallet’s blockchain requests use {networkLabel}. If the connection fails, chain requests stop. Unlock and encrypted backup remain available offline.</p>
+      {privacyNetwork === 'nym' && <p className="connection-coverage">Nym can route standard devnet lookups through Anon-RPC. Nox required for payment: the alt-mempool sidecar does not currently accept requests from the Nym exit.</p>}
       {(route.status === 'failed' || route.status === 'disconnected') && <><p>Reconnect for balances and transactions.</p><button type="button" onClick={onReconnect}>Reconnect</button></>}
       {(route.status === 'failed' || route.status === 'disconnected') && route.message && <p className="connection-coverage" role="status">{route.message}</p>}
-      {route.status === 'failed' && privacyNetwork === 'nox' && onNetworkChange && <button type="button" onClick={() => onNetworkChange('nym')}>Try Nym instead</button>}
+      {route.status === 'failed' && privacyNetwork === 'nox' && onNetworkChange && <button type="button" onClick={() => onNetworkChange('nym')}>Use Nym for private lookup</button>}
       <details style={{ marginTop: 28 }}>
       <summary>Technical details</summary>
       {route.message && route.status === 'connecting' && <p className="connection-coverage">{route.message}</p>}
