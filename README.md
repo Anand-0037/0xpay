@@ -14,7 +14,7 @@ A normal wallet asks an RPC provider about addresses and transactions from the u
 2. Send a note to a recipient. The browser creates a Groth16 proof that binds the pool root, note nullifier, recipient and fee. A fresh zero-ETH key submits the frame transaction. The staked pool verifies the proof, pays gas and pays the recipient.
 3. Inspect an address or transaction without creating a wallet. **Private lookup** sends supported devnet RPC reads through Anon-RPC and stops when that route fails. It does not provide full address history.
 
-The claim needs the alternative mempool: its proof validation exceeds the canonical 100,000-gas prefix limit, and the payer reads its own storage. The app submits through the normal sidecar path, not a privileged builder endpoint. The wallet uses the [Anon-RPC browser harness](https://ethereum.github.io/anon-rpc/wallets/) with Nox by default and Nym as another worker. No direct RPC fallback is used for supported app reads.
+The claim needs the alternative mempool: its proof validation exceeds the canonical 100,000-gas prefix limit, and the payer reads its own storage. The app submits through the normal sidecar path, not a privileged builder endpoint. The wallet uses the [Anon-RPC browser harness](https://ethereum.github.io/anon-rpc/wallets/) with Nox by default. Nym supports standard lookups on this devnet; the current sidecar requires Nox for payment. No direct RPC fallback is used for supported app reads.
 
 ```text
 Browser: encrypted note + local proof
@@ -53,7 +53,7 @@ This is **unaudited devnet software** using a development trusted setup and draf
 
 ## CROPS
 
-- **Censorship resistance:** Open-source client and protocol; the hosted app, worker, sidecar and builder remain availability dependencies.
-- **Open source:** MIT-licensed authored code; the generated SnarkJS verifier retains its upstream GPL-3.0 notice.
-- **Privacy:** Routed RPC calls reduce direct IP linkage. The public chain and other network paths expose the limits above.
-- **Security:** Keys and notes stay encrypted in the browser vault. The contracts, development setup and frontend are unaudited.
+- **Censorship resistance:** The hosted domain, selected worker, sidecar and builder remain dependencies. If the private route fails, the app stops chain reads and payments; users can build the open client, but cannot force a sidecar to include a payment.
+- **Open source:** Authored code is MIT licensed; the generated SnarkJS verifier retains its upstream GPL-3.0 notice. The repo includes build instructions and protocol source; running a payment still needs a compatible devnet.
+- **Privacy:** For routed calls, the RPC sees query contents without the browser's direct IP. Bootstrap and page hosts receive separate requests; the public chain exposes the deposit, payout, recipient, amount and timing. No client analytics or trackers are installed.
+- **Security:** Funding keys and notes stay encrypted in browser storage, with a separate encrypted note backup. The frontend, contracts and development trusted setup are unaudited; users must trust the code they load.
