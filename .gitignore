@@ -36,6 +36,7 @@ test-results/
 
 # Private working notes live outside the repo
 hack/
+docs/
 STATUS.md
 BLOCKERS.md
 digest.txt
