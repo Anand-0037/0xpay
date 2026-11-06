@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AbiCoder } from 'ethers'
 import { APP_RPC_URL, PrivateRpc } from '../src/rpc.ts'
+import { assertPrivateRouteReady, bindEthersToPrivateRoute, unbindEthersRoute } from '../src/rpc/ethers-transport.ts'
 
 const rpcReply = (request: string) => {
   const { id, method } = JSON.parse(request) as { id: number; method: string }
@@ -61,4 +62,18 @@ test('replaced workers cannot restore stale bundle resolver access', async () =>
   assert.deepEqual(route.approvedBundleResolvers, [])
   callbacks[1](selector, encoded('https://late.example/worker.js'))
   assert.deepEqual(route.approvedBundleResolvers, [])
+})
+
+test('transaction preparation requires a live private worker route', async () => {
+  const route = new PrivateRpc(() => ({
+    ready: Promise.resolve(), close() {},
+    async fetch(_url, init) { return rpcReply(String(init.body)) },
+  }))
+  assert.throws(() => assertPrivateRouteReady(), /unavailable/)
+  await route.connect()
+  bindEthersToPrivateRoute(route)
+  assert.doesNotThrow(() => assertPrivateRouteReady())
+  route.close()
+  assert.throws(() => assertPrivateRouteReady(), /unavailable/)
+  unbindEthersRoute(route)
 })

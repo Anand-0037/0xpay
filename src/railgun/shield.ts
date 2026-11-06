@@ -7,6 +7,7 @@ import {
   gasEstimateForShieldBaseToken, getShieldPrivateKeySignatureMessage, populateShieldBaseToken,
 } from '@railgun-community/wallet'
 import { APP_RPC_URL } from '../rpc'
+import { assertPrivateRouteReady } from '../rpc/ethers-transport'
 import { findTransaction, markTransaction, recordSubmitted, unresolvedTransaction } from '../domain/tx-journal'
 import { getConnectedInjectedSigner } from '../wallet/injected'
 
@@ -50,6 +51,7 @@ function checkedFeeData(maxFeePerGas: bigint | null, maxPriorityFeePerGas: bigin
 }
 
 export async function quoteEthShield(amountWei: bigint, recipientAddress: string, feeBasisPoints: bigint): Promise<ShieldQuote> {
+  assertPrivateRouteReady()
   if (amountWei <= 0n) throw new Error('Shield amount must be greater than zero')
   if (feeBasisPoints < 0n || feeBasisPoints >= 10_000n) throw new Error('Shield fee is unavailable')
   if (unresolvedTransaction('shield')) throw new Error('A previous shield is unresolved. Check its transaction before sending another.')
@@ -122,6 +124,7 @@ export async function submitEthShield(quote: ShieldQuote): Promise<ShieldSubmiss
     }
     pendingShield = null
     // An extension may broadcast before reporting a transport error. Never reuse this draft.
+    assertPrivateRouteReady()
     const sent = await signer.sendTransaction({ ...transaction, chainId: 11155111 })
     submittedShields.set(sent.hash, { sourceAddress: draft.quote.sourceAddress })
     let journalSaved = true

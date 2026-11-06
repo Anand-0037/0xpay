@@ -8,6 +8,7 @@ import {
   populateProvedTransfer,
 } from '@railgun-community/wallet'
 import { APP_RPC_URL } from '../rpc'
+import { assertPrivateRouteReady } from '../rpc/ethers-transport'
 import { findTransaction, markTransaction, recordSubmitted, unresolvedTransaction } from '../domain/tx-journal'
 import { getConnectedInjectedSigner } from '../wallet/injected'
 import { unlockedEncryptionKey, unlockedWalletId } from '../wallet/lifecycle'
@@ -62,6 +63,7 @@ function recipients(amountWei: bigint, recipientAddress: string): RailgunERC20Am
 
 /** Quote a self-broadcast private WETH transfer; the public gas payer stays visible onchain. */
 export async function quotePrivateWethSend(amountWei: bigint, recipientAddress: string): Promise<PrivateSendQuote> {
+  assertPrivateRouteReady()
   if (amountWei <= 0n) throw new Error('Send amount must be greater than zero')
   assertValidRailgunAddress(recipientAddress)
   if (unresolvedTransaction('send')) throw new Error('A previous private send is unresolved. Check its transaction before sending another.')
@@ -141,6 +143,7 @@ export async function submitPrivateWethSend(quote: PrivateSendQuote,
       BigInt(transaction.value ?? 0) !== 0n) throw new Error('RAILGUN prepared an unexpected transfer transaction')
     const checkedSigner = await getConnectedInjectedSigner()
     if (getAddress(await checkedSigner.getAddress()) !== draft.quote.publicGasPayer) throw new Error('Public gas wallet changed before sending')
+    assertPrivateRouteReady()
     const response = await checkedSigner.sendTransaction({ ...transaction, chainId: 11155111 })
     sent.set(response.hash, { gasPayer: draft.quote.publicGasPayer })
     let journalSaved = true

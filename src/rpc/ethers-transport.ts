@@ -1,5 +1,5 @@
 import { FetchRequest } from 'ethers'
-import { APP_RPC_URL, type PrivateRpc } from '../rpc'
+import { APP_RPC_URL, type PrivateRpc } from '../rpc.ts'
 
 let activeRoute: PrivateRpc | null = null
 let registered = false
@@ -27,4 +27,8 @@ export function bindEthersToPrivateRoute(route: PrivateRpc) {
 
 export function unbindEthersRoute(route: PrivateRpc) {
   if (activeRoute === route) activeRoute = null
+}
+
+export function assertPrivateRouteReady() {
+  if (activeRoute?.status !== 'ready') throw new Error('Private route is unavailable. Reconnect before reviewing or sending.')
 }
