@@ -40,16 +40,29 @@ export function createPoolApi(route: PrivateRpc) {
         assertNoteSession(session)
         const note = createNote(config.pool, config.chainId)
         await mutateStoredNotes(records => { records.push({ note, status: 'pending-deposit' }) }, session)
-        const result = await deposit(note, { privateKey, onStep: step => { assertNoteSession(session); onStep?.(step) }, transport: operationTransport,
-          onPrepared: async intent => {
-            if (intent.operation !== 'deposit') throw new Error('Prepared operation does not match this deposit')
+        let result: Awaited<ReturnType<typeof deposit>>
+        try {
+          result = await deposit(note, { privateKey, onStep: step => { assertNoteSession(session); onStep?.(step) }, transport: operationTransport,
+            onPrepared: async intent => {
+              if (intent.operation !== 'deposit') throw new Error('Prepared operation does not match this deposit')
+              await mutateStoredNotes(records => {
+                const entry = records.find(value => value.note.commitment === note.commitment)
+                if (!entry || entry.status !== 'pending-deposit') throw new Error('Pending deposit note is unavailable')
+                entry.txHash = intent.txHash; entry.pending = intent
+              }, session)
+            },
+          })
+        } catch (error) {
+          // A failure before preparing the signed hash cannot have broadcast.
+          // Keep any note with a hash reserved for exact-receipt recovery.
+          try {
             await mutateStoredNotes(records => {
-              const entry = records.find(value => value.note.commitment === note.commitment)
-              if (!entry || entry.status !== 'pending-deposit') throw new Error('Pending deposit note is unavailable')
-              entry.txHash = intent.txHash; entry.pending = intent
+              const index = records.findIndex(value => value.note.commitment === note.commitment)
+              if (index >= 0 && records[index].status === 'pending-deposit' && !records[index].pending && !records[index].txHash) records.splice(index, 1)
             }, session)
-          },
-        })
+          } catch { /* Keep the note when storage or wallet session changes. */ }
+          throw error
+        }
         const refreshed = await mutateStoredNotes(records => {
           const entry = records.find(x => x.note.commitment === note.commitment)
           if (!entry) throw new Error('Stored deposit note is missing; do not deposit again')

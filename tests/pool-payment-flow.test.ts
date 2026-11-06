@@ -117,3 +117,26 @@ test('API keeps the encrypted prepared deposit hash when its submission response
     assert.equal([...storage.values()].some(value => value.includes(stored.note.secret.toString())), false)
   } finally { await lockLocalWallet() }
 })
+
+
+test('pre-signing deposit failure removes its orphan note and never broadcasts', async () => {
+  const storage = new Map<string, string>()
+  Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true })
+  Object.defineProperty(globalThis, 'localStorage', { value: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => { storage.set(key, value) },
+  }, configurable: true })
+  await createLocalWallet('disposable test password', 0)
+  let broadcasts = 0
+  const route = { fetchRpc: async (body: string) => {
+    const request = JSON.parse(body) as { method: string }
+    if (request.method === 'eth_getTransactionCount') throw new Error('Private route failed before signing')
+    if (request.method === 'eth_sendRawTransaction') broadcasts++
+    throw new Error(`Unexpected fixture request: ${request.method}`)
+  } } as unknown as PrivateRpc
+  try {
+    await assert.rejects(createPoolApi(route).depositNotes(1), /failed before signing/)
+    assert.equal(broadcasts, 0)
+    assert.deepEqual(await listStoredNotes(), [])
+  } finally { await lockLocalWallet() }
+})
