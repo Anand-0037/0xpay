@@ -58,7 +58,8 @@ function App() {
       if (rpcRef.current !== rpc || uiGeneration.current !== generation) return
       const message = error instanceof Error ? error.message : 'Private route failed'
       if (startingEngine) setEngine({ status: 'failed', message })
-      if (rpc.status !== 'ready') setRoute({ status: 'failed', message, stats: rpc.stats })
+      if (!startingEngine) unbindEthersRoute(rpc)
+      setRoute({ status: 'failed', message, stats: rpc.stats })
     }
   }, [])
 
@@ -102,7 +103,7 @@ function App() {
     <ConnectionDetails open={connectionOpen} route={route} engine={engine} traffic={trafficSnapshot()} onClose={() => setConnectionOpen(false)} onReconnect={retryRoute} />
 
     <main className="wallet-main">
-      <WalletPanel blockNumber={route.status === 'ready' ? route.blockNumber : null} engineReady={engine.status === 'ready'} connectionFailed={route.status === 'failed' || engine.status === 'failed'} onRetry={retryRoute} session={wallet} onSession={setWallet} />
+      <WalletPanel blockNumber={route.status === 'ready' ? route.blockNumber : null} engineReady={engine.status === 'ready'} shieldFeeBasisPoints={engine.status === 'ready' ? engine.shieldFeeBasisPoints : null} connectionFailed={route.status === 'failed' || engine.status === 'failed'} onRetry={retryRoute} session={wallet} onSession={setWallet} />
       {wallet && route.status === 'failed' && <div className="route-error" role="alert">Private route is down. No direct RPC fallback is used. <button type="button" onClick={retryRoute}>Reconnect</button></div>}
     </main>
   </div>

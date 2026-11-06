@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { JsonRpcProvider, formatEther } from 'ethers'
 import { APP_RPC_URL } from '../rpc'
+import { ShieldPanel } from './ShieldPanel'
+import { PrivateBalance } from './PrivateBalance'
 import {
   browserWalletAvailable, connectInjectedWallet, forgetInjectedWallet, watchInjectedWallet,
   type InjectedAccount,
@@ -13,6 +15,7 @@ import {
 type Props = {
   blockNumber: number | null
   engineReady: boolean
+  shieldFeeBasisPoints: bigint | null
   connectionFailed: boolean
   onRetry: () => void
   session: WalletSession | null
@@ -24,7 +27,7 @@ type FundingBalance =
   | { address: string; status: 'error'; message: string }
   | null
 
-export function WalletPanel({ blockNumber, engineReady, connectionFailed, onRetry, session, onSession }: Props) {
+export function WalletPanel({ blockNumber, engineReady, shieldFeeBasisPoints, connectionFailed, onRetry, session, onSession }: Props) {
   const [view, setView] = useState<'connect' | 'private'>('connect')
   const [mode, setMode] = useState<'create' | 'import' | 'unlock'>(() => hasStoredVault() ? 'unlock' : 'create')
   const [password, setPassword] = useState('')
@@ -37,6 +40,7 @@ export function WalletPanel({ blockNumber, engineReady, connectionFailed, onRetr
   const [error, setError] = useState('')
   const [fundingBalance, setFundingBalance] = useState<FundingBalance>(null)
   const [balanceRefresh, setBalanceRefresh] = useState(0)
+  const [privateBalanceRefresh, setPrivateBalanceRefresh] = useState(0)
   const [injected, setInjected] = useState<InjectedAccount | null>(null)
   const [connectingInjected, setConnectingInjected] = useState(false)
   const [injectedError, setInjectedError] = useState('')
@@ -44,6 +48,7 @@ export function WalletPanel({ blockNumber, engineReady, connectionFailed, onRetr
   useEffect(() => {
     if (!injected) return
     return watchInjectedWallet(() => {
+      void import('../railgun/shield').then(({ discardShieldQuote }) => discardShieldQuote())
       setInjected(null)
       setFundingBalance(null)
       setInjectedError('Browser wallet changed. Connect it again to use that account.')
@@ -97,6 +102,7 @@ export function WalletPanel({ blockNumber, engineReady, connectionFailed, onRetr
   }
 
   function selectLocalFunding() {
+    void import('../railgun/shield').then(({ discardShieldQuote }) => discardShieldQuote())
     forgetInjectedWallet()
     setInjected(null)
     setFundingBalance(null)
@@ -138,10 +144,13 @@ export function WalletPanel({ blockNumber, engineReady, connectionFailed, onRetr
     setError('')
     try {
       await lockLocalWallet()
+      const { discardShieldQuote } = await import('../railgun/shield')
+      discardShieldQuote()
       selectLocalFunding()
       onSession(null)
       setRecoveryPhrase('')
       setShowRecovery(false)
+      setAnswers(['', '', ''])
       setMode('unlock')
       setView('connect')
     } catch (cause) {
@@ -170,7 +179,24 @@ export function WalletPanel({ blockNumber, engineReady, connectionFailed, onRetr
         <div><span>{injected ? 'Browser wallet · Sepolia' : 'Local public funding address'}</span><code>{publicAddress}</code><button type="button" onClick={() => publicAddress && navigator.clipboard.writeText(publicAddress)}>Copy funding address</button><span>Sepolia ETH for gas</span><strong role={balanceForSource?.status === 'error' ? 'alert' : undefined}>{balanceLabel}</strong>{balanceForSource?.status === 'error' && routeReady && <small>{balanceForSource.message}</small>}<button type="button" disabled={!routeReady} onClick={() => { setFundingBalance(null); setBalanceRefresh((value) => value + 1) }}>Refresh balance</button>{injected ? <button type="button" onClick={selectLocalFunding}>Use local funding address</button> : <button type="button" onClick={connectBrowserWallet} disabled={connectingInjected || !browserWalletAvailable()}>{connectingInjected ? 'Connecting…' : 'Connect browser wallet'}</button>}{!injected && !browserWalletAvailable() && <small>No browser wallet detected</small>}{injectedError && <small role="alert">{injectedError}</small>}{injected && <small>Local public address: {session.publicAddress}</small>}</div>
       </div>
       <p>Use the public address for Sepolia ETH. Use the private address to receive shielded funds.</p>
+      <PrivateBalance walletId={session.id} routeReady={routeReady && engineReady} refreshKey={privateBalanceRefresh} />
       {recoveryPhrase && <div className="recovery-box"><strong>Back up your recovery phrase</strong><p>Write these words down privately. They restore this wallet; anyone with them can move its funds. We hide them when you lock or reload.</p><button type="button" onClick={() => setShowRecovery((shown) => !shown)}>{showRecovery ? 'Hide recovery phrase' : 'Reveal recovery phrase'}</button>{showRecovery && <code className="recovery-words">{recoveryPhrase}</code>}<form onSubmit={confirmBackup} className="backup-check"><p>Confirm three words from your backup.</p>{challenge.map((position, index) => <label key={position}>Word {position + 1}<input type="text" value={answers[index]} onChange={(event) => setAnswers((current) => current.map((answer, i) => i === index ? event.target.value : answer))} autoComplete="off" spellCheck={false} required /></label>)}<button className="primary" type="submit">I saved my recovery phrase</button></form></div>}
+      {injected && !recoveryPhrase && shieldFeeBasisPoints !== null && <ShieldPanel
+        onQuote={async (amountWei) => {
+          const { quoteEthShield } = await import('../railgun/shield')
+          return quoteEthShield(amountWei, session.railgunAddress, shieldFeeBasisPoints)
+        }}
+        onSubmit={async (quote) => {
+          const { submitEthShield } = await import('../railgun/shield')
+          return submitEthShield(quote)
+        }}
+        onConfirm={async (transactionHash) => {
+          const { confirmEthShield } = await import('../railgun/shield')
+          const receipt = await confirmEthShield(transactionHash)
+          if (receipt.status === 'confirmed') setPrivateBalanceRefresh((value) => value + 1)
+          return receipt
+        }}
+      />}
     </> : view === 'connect' ? <>
       <p>Connect a browser wallet on Sepolia for public funding. Your private balance uses a separate encrypted RAILGUN wallet.</p>
       {injected ? <>
