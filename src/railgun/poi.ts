@@ -17,6 +17,7 @@ export async function checkSepoliaPoi() {
     if (!response.ok) throw new Error(`POI returned HTTP ${response.status}`)
     const data: unknown = await response.json()
     if (typeof data !== 'object' || data === null || !('id' in data) || data.id !== 1 ||
+      !('jsonrpc' in data) || data.jsonrpc !== '2.0' || 'error' in data ||
       !('result' in data) || typeof data.result !== 'object' || data.result === null ||
       !('validatedTxidIndex' in data.result) ||
       !Number.isSafeInteger(data.result.validatedTxidIndex) ||
