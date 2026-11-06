@@ -94,6 +94,36 @@ test('pending transaction metadata survives encryption but no signer key is incl
   assert.equal(decoded[0].status, 'spending')
   assert.equal('privateKey' in decoded[0].pending!, false)
 })
+test('restoring an exact pending payment keeps its intent over an equal-status local note', () => {
+  const claim = makeRecord(), deposit = makeRecord()
+  const claimHash = `0x${'a'.repeat(64)}` as Hex, depositHash = `0x${'b'.repeat(64)}` as Hex
+  const pendingClaim: StoredNote = { ...claim, status: 'spending', txHash: claimHash, pending: {
+    operation: 'claim', txHash: claimHash, chainId: config.chainId, pool: claim.note.pool,
+    sender: `0x${'2'.repeat(40)}`, recipient: `0x${'3'.repeat(40)}`,
+    nullifierHash: `0x${hash(claim.note.nullifier).toString(16).padStart(64, '0')}`,
+    feeWei: String(CLAIM_FEE), amountWei: String(NOTE_VALUE - CLAIM_FEE),
+  } }
+  const pendingDeposit: StoredNote = { ...deposit, status: 'pending-deposit', txHash: depositHash, pending: {
+    operation: 'deposit', txHash: depositHash, chainId: config.chainId, pool: deposit.note.pool,
+    sender: `0x${'2'.repeat(40)}`, commitment: deposit.note.commitment,
+    nonce: 0, amountWei: String(NOTE_VALUE),
+  } }
+  const local: StoredNote[] = [
+    { ...claim, status: 'spending', txHash: `0x${'c'.repeat(64)}` as Hex },
+    { ...deposit, status: 'pending-deposit' },
+  ]
+  const merged = mergeRestoredNotes(local, [pendingClaim, pendingDeposit])
+  assert.equal(merged.notes[0].pending?.txHash, claimHash)
+  assert.equal(merged.notes[0].txHash, claimHash)
+  assert.equal(merged.notes[1].pending?.txHash, depositHash)
+  assert.equal(merged.notes[1].txHash, depositHash)
+  assert.equal(local[0].pending, undefined)
+  assert.equal(merged.result.reserved, 2)
+  assert.equal(mergeRestoredNotes([pendingClaim], [{ ...claim, status: 'spending' }]).notes[0].pending?.txHash, claimHash)
+  assert.equal(mergeRestoredNotes([{ ...claim, status: 'spent' }], [pendingClaim]).notes[0].status, 'spent')
+  assert.throws(() => mergeRestoredNotes([pendingClaim], [{ ...pendingClaim, txHash: depositHash,
+    pending: { ...pendingClaim.pending!, txHash: depositHash } }]), /conflicting pending payments/)
+})
 test('mnemonic restore in fresh storage can decrypt a separate note backup despite a new vault password and salt', async () => {
   const created = await createLocalWallet('first disposable wallet password', 0)
   const originalWallet = unlockedWalletId(), record = makeRecord()

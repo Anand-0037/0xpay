@@ -142,8 +142,18 @@ export function mergeRestoredNotes(current: StoredNote[], imported: StoredNote[]
     if (index < 0) { merged.push({ ...record, note: { ...record.note } }); return false }
     const previous = merged[index]
     if (previous.note.nullifier !== record.note.nullifier || previous.note.secret !== record.note.secret) throw new Error('Existing note does not match this backup')
-    if (rank[record.status] > rank[previous.status]) merged[index] = { ...record, note: { ...record.note } }
-    else if (record.source === 'link') previous.source = 'link'
+    if (previous.pending && record.pending) {
+      const fields = (intent: typeof previous.pending) => JSON.stringify(Object.entries(intent!).sort(([a], [b]) => a.localeCompare(b)))
+      if (fields(previous.pending) !== fields(record.pending)) throw new Error('This note has conflicting pending payments; reconcile the existing payment before restoring')
+    }
+    // An exact signed intent must survive a restore even when both records have
+    // the same status. Its hash is needed to reconcile an uncertain broadcast.
+    if (previous.status !== 'spent' && (record.status === 'spent'
+      || (record.pending && !previous.pending)
+      || (!previous.pending && rank[record.status] > rank[previous.status]))) {
+      merged[index] = { ...record, note: { ...record.note } }
+    }
+    if (previous.source === 'link' || record.source === 'link') merged[index].source = 'link'
     return true
   }
   for (const record of current) combine(record)
