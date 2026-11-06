@@ -55,3 +55,10 @@
 .px-route-wait { margin: 0; padding: 12px 20px; border-bottom: 1px solid var(--px-line); color: var(--px-muted); background: var(--px-surface-2); font-size: 14px; }
 
 @media (max-width: 650px) { .px-header-end .px-route { display: none; } }
+
+.px-funding strong { min-width: 0; overflow-wrap: anywhere; }
+.px-funding div { grid-template-columns: 155px 1fr; }
+.px-funding code { font-size: 12px; font-weight: 500; }
+.px-copy-address { margin-left: 10px; padding: 5px 8px; border: 1px solid var(--px-line); border-radius: 6px; background: var(--px-surface); color: var(--px-accent); font: inherit; cursor: pointer; }
+.px-funding-shortfall { color: var(--px-accent) !important; font-weight: 600; }
+@media (max-width: 650px) { .px-funding div { grid-template-columns: 1fr; } }

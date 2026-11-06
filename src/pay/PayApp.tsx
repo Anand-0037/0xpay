@@ -8,6 +8,7 @@ import QrCode from './QrCode'
 import NoteBackupControls from './NoteBackupControls'
 import { WalletViewGate } from './view-gate'
 import { clearImportedPaymentLink } from './payment-link-url'
+import { depositGate } from './deposit-gate'
 import './PayApp.css'
 
 type Screen = 'dashboard' | 'deposit' | 'send' | 'link' | 'claim'
@@ -58,6 +59,7 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
   const [importedClaims, setImportedClaims] = useState<Address[]>([])
   const [selectedImportedClaim, setSelectedImportedClaim] = useState<Address | null>(null)
   const [copied, setCopied] = useState(false)
+  const [fundingAddressCopied, setFundingAddressCopied] = useState(false)
   const [checkingHash, setCheckingHash] = useState<Address | null>(null)
   const [recoveryStatus, setRecoveryStatus] = useState('')
   const viewGate = useRef(new WalletViewGate())
@@ -156,6 +158,10 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
   const pendingPayments = data.activity?.filter(item => item.pending && item.txHash) ?? []
   const hasPendingDeposit = pendingPayments.some(item => item.operation === 'deposit')
   const depositQuote = api.getDepositQuote?.(count)
+  const fundingAddress = api.getFundingAddress?.() ?? null
+  const depositStatus = depositGate({ routeReady: connectionReady, routeConnecting: Boolean(connectionMessage?.startsWith('Connecting privately')), paymentWorkerReady: !nymPaymentUnavailable,
+    activityLoaded: data.activity !== null, activityFailed: Boolean(dataErrors.activity), pendingDeposit: hasPendingDeposit,
+    balanceWei: data.publicBalance, balanceFailed: Boolean(dataErrors.publicBalance), maximumDebitWei: depositQuote?.maximumDebitWei })
   const amount = `${formatEth(BigInt(count) * noteWei, 1)} ETH`
   const privateNotes = data.notes
   const sendCount = activeSendCount ?? (privateNotes === null ? count : Math.min(count, Math.max(1, privateNotes)))
@@ -193,7 +199,39 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
           {recoveryStatus && <p role="status">{recoveryStatus}</p>}
         </section>}
       </>}
-      {screen === 'deposit' && <section className="px-flow"><button disabled={busy} className="px-back" onClick={() => navigate('dashboard')}>← Overview</button><p className="px-kicker">ADD FUNDS PRIVATELY</p><h1>Move funds into<br /><em>your private balance.</em></h1><p className="px-lead">Each deposit creates one encrypted 0.1 ETH note in your wallet vault. The deposit itself is public.</p><div className="px-flow-card"><label htmlFor="deposit-count">Number of notes</label><div className="px-counter"><button disabled={busy} onClick={() => setCount(Math.max(1, count - 1))} aria-label="Remove one note">−</button><strong id="deposit-count">{count}</strong><button disabled={busy} onClick={() => setCount(Math.min(20, count + 1))} aria-label="Add one note">+</button></div><p>{amount} moves from your public balance</p>{review && <div className="px-review"><h2>Review deposit</h2><div><span>Deposit amount</span><strong>{amount}</strong></div>{depositQuote && <><div><span>Maximum network fee</span><strong>{formatEth(depositQuote.maxNetworkFeeWei, 4)} ETH</strong></div><div><span>Maximum public debit</span><strong>{formatEth(depositQuote.maximumDebitWei, 4)} ETH</strong></div></>}<div><span>Private balance receives</span><strong>{count} encrypted {count === 1 ? 'note' : 'notes'}</strong></div><p>The network fee is a signed maximum, not measured gas. Anyone can see the deposit. Your later claim is unlinkable only within the pool’s anonymity set.</p></div>}{!review ? <button disabled={busy || !connectionReady || nymPaymentUnavailable} className="px-button px-button-primary" onClick={() => setReview(true)}>Review deposit ↗</button> : <button disabled={busy || done || hasPendingDeposit || !connectionReady || nymPaymentUnavailable || (depositQuote !== undefined && data.publicBalance !== null && data.publicBalance < depositQuote.maximumDebitWei)} className="px-button px-button-primary" onClick={() => void run(emit => api.depositNotes(count, emit))}>{busy ? 'Depositing…' : done ? 'Deposited' : 'Confirm deposit'}</button>}{hasPendingDeposit && <p>Check the existing deposit before starting another.</p>}{depositQuote && data.publicBalance !== null && data.publicBalance < depositQuote.maximumDebitWei && <p>Public balance is below the signed maximum debit.</p>}</div>{steps.length > 0 && <div className="px-event-log" role="status">{steps.map((step, i) => <p key={i}>{step.kind === 'included' ? `Included in block ${step.blockNumber}` : step.kind}</p>)}</div>}{done && <p className="px-success" role="status">Deposit complete. Your balance is refreshing.</p>}</section>}
+      {screen === 'deposit' && <section className="px-flow">
+        <button disabled={busy} className="px-back" onClick={() => navigate('dashboard')}>← Overview</button>
+        <p className="px-kicker">ADD FUNDS PRIVATELY</p>
+        <h1>Move funds into<br /><em>your private balance.</em></h1>
+        <p className="px-lead">Each deposit creates one encrypted 0.1 ETH note in your wallet vault. The deposit itself is public.</p>
+        <div className="px-flow-card">
+          <label htmlFor="deposit-count">Number of notes</label>
+          <div className="px-counter">
+            <button disabled={busy} onClick={() => { setCount(Math.max(1, count - 1)); setReview(false) }} aria-label="Remove one note">−</button>
+            <strong id="deposit-count">{count}</strong>
+            <button disabled={busy} onClick={() => { setCount(Math.min(20, count + 1)); setReview(false) }} aria-label="Add one note">+</button>
+          </div>
+          <p>{amount} moves from your public balance.</p>
+          <div className="px-review px-funding" aria-label="Deposit funding">
+            <h2>Funding check</h2>
+            <div><span>Funding address</span><strong><code>{fundingAddress ?? 'Unavailable'}</code>{fundingAddress && <button type="button" className="px-copy-address" onClick={() => { void navigator.clipboard.writeText(fundingAddress).then(() => setFundingAddressCopied(true)).catch(() => setError('Could not copy the funding address. Select it above to copy manually.')) }}>{fundingAddressCopied ? 'Copied' : 'Copy'}</button>}</strong></div>
+            <div><span>Available</span><strong>{dataErrors.publicBalance ? 'Unavailable' : data.publicBalance === null ? 'Checking…' : `${formatEth(data.publicBalance, 8)} ETH`}</strong></div>
+            <div><span>Deposit</span><strong>{amount}</strong></div>
+            <div><span>Maximum network fee</span><strong>{depositQuote ? `${formatEth(depositQuote.maxNetworkFeeWei, 8)} ETH` : 'Unavailable'}</strong></div>
+            <div><span>Required maximum debit</span><strong>{depositQuote ? `${formatEth(depositQuote.maximumDebitWei, 8)} ETH` : 'Unavailable'}</strong></div>
+            <p>This is a signed maximum. Actual gas may cost less.</p>
+          </div>
+          {depositStatus.shortfallWei > 0n && <p className="px-funding-shortfall" role="status">Add at least {formatEth(depositStatus.shortfallWei, 18)} devnet ETH to the address above.</p>}
+          {depositStatus.reason && depositStatus.shortfallWei === 0n && <p role="status">{depositStatus.reason}</p>}
+          {(dataErrors.publicBalance || dataErrors.activity) && <button type="button" className="px-button px-button-secondary" disabled={!connectionReady || busy} onClick={refresh}>Retry funding check</button>}
+          {review && <div className="px-review"><h2>Review deposit</h2><div><span>Private balance receives</span><strong>{count} encrypted {count === 1 ? 'note' : 'notes'}</strong></div><p>Anyone can see the public deposit. A later claim can be linked by timing or a small anonymity set.</p></div>}
+          {!review
+            ? <button disabled={busy || !depositStatus.ready} className="px-button px-button-primary" onClick={() => setReview(true)}>Review deposit ↗</button>
+            : <button disabled={busy || done || !depositStatus.ready} className="px-button px-button-primary" onClick={() => void run(emit => api.depositNotes(count, emit))}>{busy ? 'Depositing…' : done ? 'Deposited' : 'Confirm deposit'}</button>}
+        </div>
+        {steps.length > 0 && <div className="px-event-log" role="status">{steps.map((step, i) => <p key={i}>{step.kind === 'included' ? `Included in block ${step.blockNumber}` : step.kind}</p>)}</div>}
+        {done && <p className="px-success" role="status">Deposit complete. Your balance is refreshing.</p>}
+      </section>}
       {screen === 'send' && <section className="px-flow">
         <button disabled={busy} className="px-back" onClick={() => navigate('dashboard')}>← Overview</button>
         <p className="px-kicker">PRIVATE SEND</p>

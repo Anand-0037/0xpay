@@ -14,6 +14,7 @@ export type ClaimStep =
   | { kind: 'balance'; address: Address; balanceWei: bigint; noteIndex?: number }
 
 export type PayApi = {
+  getFundingAddress?(): Address
   getPublicBalance(): Promise<bigint>
   getPrivateBalance(): Promise<bigint>
   listNotes(): Promise<Note[]>
