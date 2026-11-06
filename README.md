@@ -28,7 +28,16 @@ A hosted browser run on [0xpay.fun](https://0xpay.fun/) completed a 0.1 devnet E
 
 [Hosted payment screen](media/hosted-payment-2026-11-06.png) — the actual browser review, canonical rejection, alternative admission, inclusion and recipient balance. The screenshot supports the walkthrough; the transaction receipt above is the onchain evidence.
 
+[Private lookup screen](media/private-lookup-2026-11-07.png) — a wallet-free read of the deployed pool address through Nox at devnet block 8169. This shows the app result, not proof that every network request is anonymous.
+
 Nox connection can time out; one fresh reload needed a second attempt. This run does not prove every browser or worker can complete the flow. The devnet can reset and erase explorer history. A receipt shows inclusion, not chain finality.
+
+## Try a payment
+
+1. Open the wallet on two clean browser profiles. In A, create a disposable devnet wallet and save its recovery words privately. Request devnet ETH in **Add to private balance** if needed, then deposit one 0.1 ETH note.
+2. Download the **encrypted note backup** after deposit. In B, restore the same recovery words and import that backup. Wait for the note to become spendable; the recovery words alone do not restore it.
+3. Choose a fresh recipient address with zero devnet ETH. Review the fee and payout in B, then submit **once**. Wait for an included receipt and check the recipient balance.
+4. Reload B: the note should remain spent. If submission is uncertain, use **Check existing transaction** before attempting anything else. Keep recovery words, backups and payment links out of screenshots.
 
 ## Run and inspect
 
