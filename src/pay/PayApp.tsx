@@ -7,6 +7,7 @@ import logo from '../assets/0xpay-logo.png'
 import QrCode from './QrCode'
 import NoteBackupControls from './NoteBackupControls'
 import { WalletViewGate } from './view-gate'
+import { clearImportedPaymentLink } from './payment-link-url'
 import './PayApp.css'
 
 type Screen = 'dashboard' | 'deposit' | 'send' | 'link' | 'claim'
@@ -37,6 +38,9 @@ function FrameDiagram() {
 export default function PayAppView({ api, connectionReady = true, connectionMessage, connectionVersion = 0 }: { api: PayApi; connectionReady?: boolean; connectionMessage?: string; connectionVersion?: number }) {
   const [screen, setScreen] = useState<Screen>(() => window.location.hash.startsWith('#claim=') ? 'claim' : 'dashboard')
   const [theme, setTheme] = useState<'dark' | 'light'>('light')
+  // Start without querying the funding address. Showing public balances is an
+  // explicit user choice; pool/note reads still use the selected private RPC.
+  const [privateNotesOnly, setPrivateNotesOnly] = useState(true)
   const [data, setData] = useState<DashboardData>(emptyData)
   const [dataErrors, setDataErrors] = useState<DashboardErrors>({})
   const [error, setError] = useState('')
@@ -50,6 +54,8 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
   const [steps, setSteps] = useState<ClaimStep[]>([])
   const [done, setDone] = useState(false)
   const [link, setLink] = useState('')
+  const [importedClaims, setImportedClaims] = useState<Address[]>([])
+  const [selectedImportedClaim, setSelectedImportedClaim] = useState<Address | null>(null)
   const [copied, setCopied] = useState(false)
   const [checkingHash, setCheckingHash] = useState<Address | null>(null)
   const [recoveryStatus, setRecoveryStatus] = useState('')
@@ -72,12 +78,15 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
     }).catch(() => {
       if (viewGate.current.isReadCurrent(ticket)) setDataErrors(current => ({ ...current, [key]: true }))
     })
-    void read('publicBalance', api.getPublicBalance())
+    if (!privateNotesOnly) void read('publicBalance', api.getPublicBalance())
     void read('privateBalance', api.getPrivateBalance())
-    void read('notes', api.listNotes().then(notes => notes.filter(note => note.spent !== true).length))
-    void read('tokens', api.tokenPortfolio())
+    void read('notes', api.listNotes().then(notes => {
+      if (viewGate.current.isReadCurrent(ticket)) setImportedClaims(notes.filter(note => note.source === 'link' && note.spent !== true && note.commitment).map(note => note.commitment!))
+      return notes.filter(note => note.spent !== true).length
+    }))
+    if (!privateNotesOnly) void read('tokens', api.tokenPortfolio())
     void read('activity', api.activity())
-  }, [api])
+  }, [api, privateNotesOnly])
   useEffect(() => {
     let cancelled = false
     void api.activity().then(activity => {
@@ -94,7 +103,7 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
   }, [refresh, connectionReady, connectionVersion, busy])
   useEffect(() => { const onHash = () => { if (!viewGate.current.busy && window.location.hash.startsWith('#claim=')) setScreen('claim') }; window.addEventListener('hashchange', onHash); return () => window.removeEventListener('hashchange', onHash) }, [])
 
-  const navigate = (next: Screen) => { if (viewGate.current.busy) return; setScreen(next); setError(''); setReview(false); setSteps([]); setDone(false); if (next === 'dashboard' && connectionReady) refresh() }
+  const navigate = (next: Screen) => { if (viewGate.current.busy) return; if (next === 'deposit') setPrivateNotesOnly(false); setScreen(next); setError(''); setReview(false); setSteps([]); setDone(false); if (next === 'dashboard' && connectionReady) refresh() }
   const run = async (operation: (emit: (step: ClaimStep) => void) => Promise<unknown>, onComplete?: (result: unknown) => void) => {
     if (!connectionReady) { setError('Reconnect the private connection before continuing.'); return }
     const ticket = viewGate.current.beginOperation()
@@ -121,6 +130,26 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
       setRecoveryStatus(`Could not verify ${short(hash)}: ${cause instanceof Error ? cause.message : String(cause)}. The note remains reserved.`)
     } finally { setCheckingHash(null) }
   }
+  const importClaim = async () => {
+    if (!connectionReady || busy || !window.location.hash.startsWith('#claim=')) return
+    const ticket = viewGate.current.beginOperation()
+    if (!ticket) return
+    const fragment = window.location.hash
+    const linkToImport = window.location.href
+    setBusy(true); setError('')
+    try {
+      const commitment = await api.importPaymentLink(linkToImport)
+      if (!viewGate.current.isCurrent(ticket)) return
+      setSelectedImportedClaim(commitment)
+      const cleanup = clearImportedPaymentLink(fragment)
+      if (cleanup === 'failed') setError('The note was saved, but the browser kept its secret in the address bar. Remove the link before sharing your screen.')
+      if (cleanup === 'not-current') setError('The note was saved, but the address bar changed before its secret could be cleared. Check the current link.')
+    } catch (cause) {
+      if (viewGate.current.isCurrent(ticket)) setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      if (viewGate.current.finish(ticket)) { setBusy(false); refresh() }
+    }
+  }
   const pendingPayments = data.activity?.filter(item => item.pending && item.txHash) ?? []
   const hasPendingDeposit = pendingPayments.some(item => item.operation === 'deposit')
   const depositQuote = api.getDepositQuote?.(count)
@@ -130,8 +159,9 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
   const sendQuote = api.getClaimQuote?.(count)
   const claimQuote = api.getClaimQuote?.(1)
   const claimFragment = window.location.hash.startsWith('#claim=') ? window.location.href : ''
+  const claimableImport = selectedImportedClaim ?? importedClaims[0] ?? null
   const dashboardErrors = { ...dataErrors }
-  if (!connectionReady && connectionMessage) {
+  if (!connectionReady && connectionMessage && !connectionMessage.startsWith('Connecting privately')) {
     for (const key of ['publicBalance', 'privateBalance', 'notes', 'tokens'] as const) {
       if (data[key] === null) dashboardErrors[key] = true
     }
@@ -139,11 +169,12 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
 
   return <div className={`px-app px-${theme}`}>
     {simulated && <div className="px-simulated" role="status">SIMULATED · Visual preview only. No chain transactions.</div>}
-    {!connectionReady && <div className="px-error" role="status">{connectionMessage ?? "Reconnect the private connection to continue. Your current payment remains on this screen."}</div>}
+    {!connectionReady && <div className={connectionMessage?.startsWith('Connecting privately') ? 'px-route-wait' : 'px-error'} role="status">{connectionMessage ?? "Reconnect the private connection to continue. Your current payment remains on this screen."}</div>}
     <header className="px-header"><button disabled={busy} className="px-brand" onClick={() => navigate('dashboard')} aria-label="0xPay dashboard"><img src={logo} alt="" /><span>0xPay<small>PRIVATE WALLET</small></span></button><nav aria-label="Wallet navigation"><button disabled={busy} aria-current={screen === 'dashboard' ? 'page' : undefined} onClick={() => navigate('dashboard')}>Overview</button><button disabled={busy} aria-current={screen === 'send' ? 'page' : undefined} onClick={() => navigate('send')}>Send</button><button disabled={busy} aria-current={screen === 'link' || screen === 'claim' ? 'page' : undefined} onClick={() => navigate('link')}>Links</button></nav><div className="px-header-end"><span className={`px-route ${privateRouteReady ? 'px-route-ok' : 'px-route-direct'}`} title={route.calls === null ? 'Route statistics unavailable' : `${route.calls} routed calls · ${route.direct} direct calls`}><i />{!connectionReady ? 'Private connection unavailable' : route.kind === 'anon-rpc' && route.worker ? `Private route · Anon-RPC ${route.worker.toUpperCase()}` : route.kind === 'direct' ? 'Direct RPC route' : 'Route status unavailable'}</span><button className="px-theme-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>{theme === 'dark' ? '☼' : '◐'}</button></div></header>
     <main className="px-main" aria-busy={busy}>
       {screen === 'dashboard' && <>
-        <Dashboard data={data} errors={dashboardErrors} onNavigate={navigate} onRetry={refresh} canRetry={connectionReady && !busy} />
+        <Dashboard data={data} errors={dashboardErrors} onNavigate={navigate} onRetry={refresh} canRetry={connectionReady && !busy} privateNotesOnly={privateNotesOnly} onPrivateNotesOnlyChange={setPrivateNotesOnly} />
+        {importedClaims.length > 0 && <section className="px-flow-card" aria-label="Imported payment notes"><h2>Received payment note</h2><p>{importedClaims.length} imported {importedClaims.length === 1 ? 'note is' : 'notes are'} saved in this encrypted wallet. Claim one into your public account when ready. The payout address and amount will be public.</p><button type="button" className="px-button px-button-primary" disabled={busy} onClick={() => navigate('claim')}>Claim received note ↗</button></section>}
         {pendingPayments.length > 0 && <section className="px-flow-card" aria-label="Payments awaiting verification">
           <h2>Check existing payments</h2>
           <p>A previous response was lost or verification did not finish. These notes remain reserved. Checking reads the exact saved transaction; it never sends again.</p>
@@ -158,8 +189,8 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
       </>}
       {screen === 'deposit' && <section className="px-flow"><button disabled={busy} className="px-back" onClick={() => navigate('dashboard')}>← Overview</button><p className="px-kicker">ADD FUNDS PRIVATELY</p><h1>Move funds into<br /><em>your private balance.</em></h1><p className="px-lead">Each deposit creates one encrypted 0.1 ETH note in your wallet vault. The deposit itself is public.</p><div className="px-flow-card"><label htmlFor="deposit-count">Number of notes</label><div className="px-counter"><button disabled={busy} onClick={() => setCount(Math.max(1, count - 1))} aria-label="Remove one note">−</button><strong id="deposit-count">{count}</strong><button disabled={busy} onClick={() => setCount(Math.min(20, count + 1))} aria-label="Add one note">+</button></div><p>{amount} moves from your public balance</p>{review && <div className="px-review"><h2>Review deposit</h2><div><span>Deposit amount</span><strong>{amount}</strong></div>{depositQuote && <><div><span>Maximum network fee</span><strong>{formatEth(depositQuote.maxNetworkFeeWei, 4)} ETH</strong></div><div><span>Maximum public debit</span><strong>{formatEth(depositQuote.maximumDebitWei, 4)} ETH</strong></div></>}<div><span>Private balance receives</span><strong>{count} encrypted {count === 1 ? 'note' : 'notes'}</strong></div><p>The network fee is a signed maximum, not measured gas. Anyone can see the deposit. Your later claim is unlinkable only within the pool’s anonymity set.</p></div>}{!review ? <button disabled={busy || !connectionReady} className="px-button px-button-primary" onClick={() => setReview(true)}>Review deposit ↗</button> : <button disabled={busy || done || hasPendingDeposit || !connectionReady || (depositQuote !== undefined && data.publicBalance !== null && data.publicBalance < depositQuote.maximumDebitWei)} className="px-button px-button-primary" onClick={() => void run(emit => api.depositNotes(count, emit))}>{busy ? 'Depositing…' : done ? 'Deposited' : 'Confirm deposit'}</button>}{hasPendingDeposit && <p>Check the existing deposit before starting another.</p>}{depositQuote && data.publicBalance !== null && data.publicBalance < depositQuote.maximumDebitWei && <p>Public balance is below the signed maximum debit.</p>}</div>{steps.length > 0 && <div className="px-event-log" role="status">{steps.map((step, i) => <p key={i}>{step.kind === 'included' ? `Included in block ${step.blockNumber}` : step.kind}</p>)}</div>}{done && <p className="px-success" role="status">Deposit complete. Your balance is refreshing.</p>}</section>}
       {screen === 'send' && <section className="px-flow"><button disabled={busy} className="px-back" onClick={() => navigate('dashboard')}>← Overview</button><p className="px-kicker">PRIVATE SEND</p><h1>A private transfer,<br /><em>made simple.</em></h1><p className="px-lead">Send from your encrypted notes. The recipient needs no ETH and takes no action.</p><div className="px-flow-card"><label htmlFor="send-count">Amount</label><div className="px-counter"><button disabled={busy} onClick={() => setCount(Math.max(1, count - 1))} aria-label="Remove 0.1 ETH">−</button><strong id="send-count">{amount}</strong><button disabled={busy} onClick={() => setCount(Math.min(20, count + 1))} aria-label="Add 0.1 ETH">+</button></div><p>{count} {count === 1 ? 'note' : 'notes'} used{privateNotes === null ? '' : ` · ${privateNotes} available`}</p><label htmlFor="recipient">Recipient address</label><input disabled={busy} id="recipient" className="px-input" value={recipient} onChange={e => setRecipient(e.target.value.trim())} placeholder="0x…" autoComplete="off" spellCheck={false} aria-invalid={recipient.length > 0 && !validAddress(recipient)} /><small className="px-help">Fresh wallets work. The recipient needs 0 ETH.</small>{review && <div className="px-review"><h2>Review private send</h2><div><span>Private</span><strong>Your wallet address and source note are not in the claim</strong></div><div><span>Public</span><strong>Pool payout · {amount} before fee · {short(recipient)}</strong></div><div><span>Gas</span><strong>The pool pays</strong></div>{sendQuote && <><div><span>Claim fee</span><strong>{formatEth(sendQuote.feeWei, 8)} ETH</strong></div><div><span>Recipient gets</span><strong>{formatEth(sendQuote.recipientWei, 8)} ETH</strong></div></>}<p>The claim fee includes the pool gas budget and margin; it is not the measured network fee. The recipient and payout are public. A small devnet pool and timing can reduce privacy. For routed calls, Anon-RPC hides your IP from the RPC; it still sees request contents.</p></div>}{!review ? <button className="px-button px-button-primary" disabled={!canSend || busy || !connectionReady} onClick={() => setReview(true)}>Review transfer ↗</button> : <button className="px-button px-button-primary" disabled={!canSend || busy || done || !connectionReady} onClick={() => void run(emit => api.privateSend({ to: recipient as Address, count, onStep: emit }))}>{busy ? 'Sending privately…' : done ? 'Transfer complete' : 'Submit private send'}</button>}</div>{steps.length > 0 && <Stepper steps={steps} count={count} />}{done && <p className="px-success" role="status">Private send complete.</p>}</section>}
-      {screen === 'link' && <section className="px-flow"><button disabled={busy} className="px-back" onClick={() => navigate('dashboard')}>← Overview</button><p className="px-kicker">PAYMENT LINK</p><h1>Send a note.<br /><em>Share a link.</em></h1><p className="px-lead">The link contains a bearer secret in its URL fragment. Anyone with it can claim the note. Share it privately.</p><div className="px-flow-card"><h2>Create a payment link</h2><p>A 0.1 ETH note is deposited and encoded into a link. The receiver claims into their unlocked wallet. A fresh 0 ETH key submits the claim.</p><button className="px-button px-button-primary" disabled={busy || Boolean(link) || !connectionReady} onClick={() => void run(() => api.createPaymentLink(), result => setLink(String(result)))}>{busy ? 'Creating link…' : link ? 'Link ready' : 'Create 0.1 ETH link'}</button>{link && <div className="px-link-result"><QrCode value={link} /><label htmlFor="created-link">Bearer link · keep private</label><input id="created-link" value={link} readOnly /><button className="px-button px-button-secondary" onClick={() => void navigator.clipboard.writeText(link).then(() => setCopied(true)).catch(() => setError('Clipboard unavailable; select and copy the link.'))}>{copied ? 'Copied' : 'Copy link'}</button></div>}</div></section>}
-      {screen === 'claim' && <section className="px-flow"><p className="px-kicker">CLAIM PAYMENT LINK</p><h1>A private payment<br /><em>is waiting for you.</em></h1><p className="px-lead">A fresh 0 ETH key submits the claim. The payout goes to your unlocked wallet, whose address is public on chain. Your link secret stays in the URL fragment.</p><div className="px-flow-card"><h2>Claim 0.1 ETH note</h2>{claimQuote ? <p>The pool pays gas. Claim fee: <strong>{formatEth(claimQuote.feeWei, 8)} ETH</strong>. Your wallet receives <strong>{formatEth(claimQuote.recipientWei, 8)} ETH</strong>. This fee covers the pool gas budget and margin, not the measured network fee.</p> : <p>The pool pays gas from the note. Review its claim fee before submitting.</p>}<button className="px-button px-button-primary" disabled={busy || done || !claimFragment || !connectionReady} onClick={() => void run(emit => api.claimLink(claimFragment, emit))}>{busy ? 'Claiming…' : done ? 'Claim complete' : 'Claim privately'}</button></div>{steps.length > 0 && <Stepper steps={steps} />}</section>}
+      {screen === 'link' && <section className="px-flow"><button disabled={busy} className="px-back" onClick={() => navigate('dashboard')}>← Overview</button><p className="px-kicker">PAYMENT LINK</p><h1>Send a note.<br /><em>Share a link.</em></h1><p className="px-lead">The link contains a bearer secret in its URL fragment. Anyone with it can claim the note. Share it privately.</p><div className="px-flow-card"><h2>Create a payment link</h2><p>A 0.1 ETH note is deposited and encoded into a link. The receiver claims it into their wallet with a fresh 0 ETH key. Until then, your wallet still holds the same note and can claim it too; this link is not a completed payment.</p><button className="px-button px-button-primary" disabled={busy || Boolean(link) || !connectionReady} onClick={() => void run(() => api.createPaymentLink(), result => setLink(String(result)))}>{busy ? 'Creating link…' : link ? 'Link ready' : 'Create 0.1 ETH link'}</button>{link && <div className="px-link-result"><QrCode value={link} /><label htmlFor="created-link">Bearer link · keep private</label><input id="created-link" value={link} readOnly /><button className="px-button px-button-secondary" onClick={() => void navigator.clipboard.writeText(link).then(() => setCopied(true)).catch(() => setError('Clipboard unavailable; select and copy the link.'))}>{copied ? 'Copied' : 'Copy link'}</button></div>}</div></section>}
+      {screen === 'claim' && <section className="px-flow"><p className="px-kicker">CLAIM PAYMENT LINK</p><h1>A private payment<br /><em>is waiting for you.</em></h1><p className="px-lead">Import the bearer note into your encrypted wallet first. The app then removes its secret from this page's address bar. A fresh 0 ETH key submits the claim; the payout address and amount are public on chain.</p><div className="px-flow-card"><h2>Claim 0.1 ETH note</h2>{claimQuote ? <p>The pool pays gas. Claim fee: <strong>{formatEth(claimQuote.feeWei, 8)} ETH</strong>. Your wallet receives <strong>{formatEth(claimQuote.recipientWei, 8)} ETH</strong>. This fee covers the pool gas budget and margin, not the measured network fee.</p> : <p>The pool pays gas from the note. Review its claim fee before submitting.</p>}{claimFragment ? <button className="px-button px-button-primary" disabled={busy || !connectionReady} onClick={() => void importClaim()}>{busy ? 'Importing…' : 'Import note to wallet'}</button> : claimableImport ? <button className="px-button px-button-primary" disabled={busy || done || !connectionReady} onClick={() => void run(emit => api.claimImportedLink(claimableImport, emit), () => refresh())}>{busy ? 'Claiming…' : done ? 'Claim complete' : 'Claim privately'}</button> : <p>No payment note is ready. Open a payment link or import one into this wallet.</p>}</div>{steps.length > 0 && <Stepper steps={steps} />}</section>}
       {error && <div className="px-error" role="alert">{error}</div>}
       <footer className="px-footer"><div><strong>0xPay</strong><span>Privacy, in your hands.</span></div><button onClick={() => setDrawer(true)}>How it works ↗</button><NoteBackupControls api={api} paymentBusy={busy} onRestored={() => { if (connectionReady) refresh() }} /><a href="https://github.com/Anand-0037" target="_blank" rel="noopener noreferrer">Anand on GitHub</a><small>Devnet only · DEV trusted setup · Unaudited · Draft ERC-8421</small></footer>
     </main>

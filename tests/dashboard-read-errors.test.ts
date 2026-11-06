@@ -35,3 +35,17 @@ test('unresolved reads stay loading instead of being reported as empty or failed
   assert.match(html, /Loading portfolio/)
   assert.doesNotMatch(html, /unavailable|No public tokens found|0 unspent/)
 })
+
+test('private notes mode does not render cached funding or token balances', () => {
+  const html = renderToStaticMarkup(createElement(Dashboard, {
+    data: { ...data, publicBalance: 12_000_000_000_000_000_000n, tokens: [{ symbol: 'USDC', balance: 250n, decimals: 6 }] },
+    errors: { publicBalance: true, tokens: true },
+    privateNotesOnly: true,
+    onPrivateNotesOnlyChange: () => {},
+    onNavigate: () => {},
+  }))
+  assert.match(html, /aria-pressed="true"/)
+  assert.match(html, /Funding-account and public-token balance reads are paused/)
+  assert.match(html, /0\.1 <small>ETH/)
+  assert.doesNotMatch(html, /12 <small>ETH|USDC|250|Public balance unavailable|Portfolio unavailable|Loading portfolio/)
+})
