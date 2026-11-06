@@ -94,6 +94,7 @@ test('API keeps the encrypted prepared deposit hash when its submission response
   let submissions = 0
   const route = { fetchRpc: async (body: string) => {
     const request = JSON.parse(body) as { id: number; method: string; params: Hex[] }
+    if (request.method === 'eth_getCode') return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: '0x6000' }))
     if (request.method === 'eth_getTransactionCount') return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: '0x0' }))
     if (request.method === 'eth_sendRawTransaction') {
       submissions++
@@ -129,7 +130,8 @@ test('pre-signing deposit failure removes its orphan note and never broadcasts',
   await createLocalWallet('disposable test password', 0)
   let broadcasts = 0
   const route = { fetchRpc: async (body: string) => {
-    const request = JSON.parse(body) as { method: string }
+    const request = JSON.parse(body) as { id: number; method: string }
+    if (request.method === 'eth_getCode') return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: '0x6000' }))
     if (request.method === 'eth_getTransactionCount') throw new Error('Private route failed before signing')
     if (request.method === 'eth_sendRawTransaction') broadcasts++
     throw new Error(`Unexpected fixture request: ${request.method}`)
@@ -137,6 +139,29 @@ test('pre-signing deposit failure removes its orphan note and never broadcasts',
   try {
     await assert.rejects(createPoolApi(route).depositNotes(1), /failed before signing/)
     assert.equal(broadcasts, 0)
+    assert.deepEqual(await listStoredNotes(), [])
+  } finally { await lockLocalWallet() }
+})
+
+
+test('devnet reset blocks value-bearing deposit before a note or transaction exists', async () => {
+  const storage = new Map<string, string>()
+  Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true })
+  Object.defineProperty(globalThis, 'localStorage', { value: {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => { storage.set(key, value) },
+  }, configurable: true })
+  await createLocalWallet('disposable test password', 0)
+  const methods: string[] = []
+  const route = { fetchRpc: async (body: string) => {
+    const request = JSON.parse(body) as { id: number; method: string }
+    methods.push(request.method)
+    if (request.method !== 'eth_getCode') throw new Error(`Unexpected request ${request.method}`)
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: '0x' }))
+  } } as unknown as PrivateRpc
+  try {
+    await assert.rejects(createPoolApi(route).depositNotes(1), /Pool contract is unavailable/)
+    assert.deepEqual(methods, ['eth_getCode'])
     assert.deepEqual(await listStoredNotes(), [])
   } finally { await lockLocalWallet() }
 })

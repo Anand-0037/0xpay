@@ -35,6 +35,11 @@ export function createPoolApi(route: PrivateRpc) {
         throw new Error('Check the existing pending deposit before starting another')
       const privateKey = unlockedFundingWallet().privateKey as Hex
       const operationTransport = sessionTransport(session)
+      // Public devnets can reset. Never send a value-bearing deposit to an
+      // address that no longer has contract code deployed.
+      const poolCode = await rpc<Hex>(config.mempoolRpc, 'eth_getCode', [config.pool, 'latest'], operationTransport)
+      if (!/^0x(?:[0-9a-f]{2})+$/i.test(poolCode) || /^0x0+$/i.test(poolCode))
+        throw new Error('Pool contract is unavailable on this devnet. Do not deposit; refresh deployment details.')
       const results: StoredNote[] = []
       for (let i = 0; i < count; i++) {
         assertNoteSession(session)
