@@ -16,7 +16,7 @@ type RouteState =
 type EngineState =
   | { status: 'waiting' | 'starting' }
   | { status: 'ready'; shieldFeeBasisPoints: bigint }
-  | { status: 'failed'; message: string }
+  | { status: 'failed'; message: string; reload?: boolean }
 
 const emptyStats: RouteStats = { attempted: 0, completed: 0, failed: 0, bootstrapReads: 0 }
 
@@ -57,6 +57,10 @@ function App() {
     } catch (error) {
       if (rpcRef.current !== rpc || uiGeneration.current !== generation) return
       const message = error instanceof Error ? error.message : 'Private route failed'
+      if (startingEngine && /(?:failed to fetch|error loading) dynamically imported module/i.test(message)) {
+        setEngine({ status: 'failed', message: 'A newer version is available. Refresh this page to continue.', reload: true })
+        return
+      }
       if (startingEngine) setEngine({ status: 'failed', message })
       if (!startingEngine) unbindEthersRoute(rpc)
       setRoute({ status: 'failed', message, stats: rpc.stats })
@@ -85,7 +89,10 @@ function App() {
     }
   }, [connectRoute])
 
-  const retryRoute = () => { if (rpcRef.current) void connectRoute(rpcRef.current, true) }
+  const retryRoute = () => {
+    if (engine.status === 'failed' && engine.reload) { window.location.reload(); return }
+    if (rpcRef.current) void connectRoute(rpcRef.current, true)
+  }
   const routeLabel = route.status === 'ready'
     ? `Private route · Nym · ${route.stats.completed}/${route.stats.attempted} reads`
     : route.status === 'connecting' ? 'Connecting private route…' : 'Private route down'
@@ -104,6 +111,7 @@ function App() {
 
     <main className="wallet-main">
       <WalletPanel blockNumber={route.status === 'ready' ? route.blockNumber : null} engineReady={engine.status === 'ready'} shieldFeeBasisPoints={engine.status === 'ready' ? engine.shieldFeeBasisPoints : null} connectionFailed={route.status === 'failed' || engine.status === 'failed'} onRetry={retryRoute} session={wallet} onSession={setWallet} />
+      {engine.status === 'failed' && engine.reload && <div className="route-error" role="alert">{engine.message} <button type="button" onClick={retryRoute}>Refresh app</button></div>}
       {wallet && route.status === 'failed' && <div className="route-error" role="alert">Private route is down. No direct RPC fallback is used. <button type="button" onClick={retryRoute}>Reconnect</button></div>}
     </main>
   </div>

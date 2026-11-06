@@ -3,7 +3,7 @@ import type { RouteStats } from '../rpc'
 import type { TrafficEntry, TrafficKind } from '../net/network-guard'
 
 type Route = { status: 'connecting' | 'ready' | 'failed'; stats: RouteStats; message?: string; blockNumber?: number }
-type Engine = { status: 'waiting' | 'starting' | 'ready' | 'failed'; message?: string; shieldFeeBasisPoints?: bigint }
+type Engine = { status: 'waiting' | 'starting' | 'ready' | 'failed'; message?: string; shieldFeeBasisPoints?: bigint; reload?: boolean }
 
 export function ConnectionDetails({ open, route, engine, traffic, onClose, onReconnect }: {
   open: boolean; route: Route; engine: Engine; traffic: { counts: Record<TrafficKind, number>; recent: TrafficEntry[] }; onClose: () => void; onReconnect: () => void
@@ -16,7 +16,7 @@ export function ConnectionDetails({ open, route, engine, traffic, onClose, onRec
     <aside id="connection-details" className="connection-drawer" role="dialog" aria-modal="true" aria-label="Connection details">
       <div className="connection-top"><div><p className="eyebrow">CONNECTION DETAILS</p><h2>How this wallet connects</h2></div><button ref={closeButton} type="button" onClick={onClose} aria-label="Close connection details">×</button></div>
       <div className={`connection-state ${route.status}`}><span className="route-dot" aria-hidden="true" /><strong>{route.status === 'ready' ? 'Private read route ready' : route.status === 'connecting' ? 'Connecting through Nym' : 'Private read route down'}</strong></div>
-      {(route.status === 'failed' || engine.status === 'failed') && <><p role="alert">{engine.status === 'failed' ? engine.message : route.message}</p><button type="button" onClick={onReconnect}>Reconnect</button></>}
+      {(route.status === 'failed' || engine.status === 'failed') && <><p role="alert">{engine.status === 'failed' ? engine.message : route.message}</p><button type="button" onClick={onReconnect}>{engine.status === 'failed' && engine.reload ? 'Refresh app' : 'Reconnect'}</button></>}
       <dl className="connection-list">
         <div><dt>Network</dt><dd>Ethereum Sepolia{route.blockNumber !== undefined ? ` · block ${route.blockNumber.toLocaleString()}` : ''}</dd></div>
         <div><dt>Worker</dt><dd>Nym via Anon-RPC</dd></div>
