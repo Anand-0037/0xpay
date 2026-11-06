@@ -44,7 +44,8 @@ test('private notes mode does not render cached funding or token balances', () =
     onPrivateNotesOnlyChange: () => {},
     onNavigate: () => {},
   }))
-  assert.match(html, /aria-pressed="true"/)
+  assert.match(html, /<h2>Private notes only<\/h2>/)
+  assert.match(html, /<button[^>]*>Show public balances<\/button>/)
   assert.match(html, /Funding-account and public-token balance reads are paused/)
   assert.match(html, /0\.1 <small>ETH/)
   assert.doesNotMatch(html, /12 <small>ETH|USDC|250|Public balance unavailable|Portfolio unavailable|Loading portfolio/)
