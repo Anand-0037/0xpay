@@ -9,6 +9,7 @@ export type InjectedAccount = { address: string; chainId: 11155111 }
 
 let connectedProvider: InjectedProvider | null = null
 let connectedAddress: string | null = null
+let selectionVersion = 0
 
 export function browserWalletAvailable() {
   return typeof window !== 'undefined' && !!(window as Window & { ethereum?: InjectedProvider }).ethereum
@@ -36,9 +37,11 @@ function checkedAddress(accounts: unknown): string {
 
 /** Requests account access only after an explicit Connect wallet click. */
 export async function connectInjectedWallet(provider: InjectedProvider = browserWallet()): Promise<InjectedAccount> {
+  const version = ++selectionVersion
   const accounts: unknown = await provider.request({ method: 'eth_requestAccounts' })
   const address = checkedAddress(accounts)
   await assertSepolia(provider)
+  if (version !== selectionVersion) throw new Error('Browser wallet connection was cancelled. Connect again.')
   connectedProvider = provider
   connectedAddress = address
   return { address, chainId: 11155111 }
@@ -46,6 +49,7 @@ export async function connectInjectedWallet(provider: InjectedProvider = browser
 
 /** Forget only this app's in-memory selection; the extension controls its own permissions. */
 export function forgetInjectedWallet() {
+  selectionVersion++
   connectedProvider = null
   connectedAddress = null
 }
@@ -69,8 +73,10 @@ export function watchInjectedWallet(onInvalidated: () => void) {
 export async function getConnectedInjectedSigner(): Promise<JsonRpcSigner> {
   const provider = connectedProvider
   const address = connectedAddress
+  const version = selectionVersion
   if (!provider || !address) throw new Error('Connect a browser wallet first.')
   await assertSepolia(provider)
+  if (version !== selectionVersion) throw new Error('Browser wallet connection changed. Reconnect before signing.')
   const accounts: unknown = await provider.request({ method: 'eth_accounts' })
   if (!Array.isArray(accounts) || !accounts.some((account) => typeof account === 'string' && isAddress(account) && getAddress(account) === address)) {
     forgetInjectedWallet()
@@ -78,5 +84,6 @@ export async function getConnectedInjectedSigner(): Promise<JsonRpcSigner> {
   }
   const signer = await new BrowserProvider(provider, 11155111).getSigner(address)
   await assertSepolia(provider)
+  if (version !== selectionVersion) throw new Error('Browser wallet connection changed. Reconnect before signing.')
   return signer
 }

@@ -43,3 +43,17 @@ test('wrong chain or changed account never yields a signer', async () => {
     await assert.rejects(getConnectedInjectedSigner(), /account changed/)
   } finally { forgetInjectedWallet() }
 })
+
+test('forgetting a wallet cancels an extension response that arrives later', async () => {
+  let approve: ((accounts: string[]) => void) | undefined
+  const provider: InjectedProvider = { async request({ method }) {
+    if (method === 'eth_requestAccounts') return new Promise<string[]>((resolve) => { approve = resolve })
+    if (method === 'eth_chainId') return '0xaa36a7'
+    throw new Error(`Unexpected wallet method: ${method}`)
+  } }
+  const connecting = connectInjectedWallet(provider)
+  forgetInjectedWallet()
+  approve?.([account])
+  await assert.rejects(connecting, /cancelled/)
+  await assert.rejects(getConnectedInjectedSigner(), /Connect a browser wallet first/)
+})
