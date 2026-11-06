@@ -4,6 +4,7 @@
   "mempoolRpc": "https://altmempool.forshtat.com/rpc",
   "explorer": "https://explorer.altmempool.wtf/",
   "pool": "0xf409d9a52cd9b8c61a44cc8c9cdef0d85b58259c",
+  "poolCodeHash": "0xb1cc34f94fba556a017082e8c8805e09b5a4a99c95024acd64eb114222f772f5",
   "poseidon": "0x3c913baa92e0bab4b6a56782f305dc62414298b0",
   "verifier": "0xd2059624c0b6718e187b93ee715e0e9163e5777f",
   "registry": "0xd51c04d7a0b01124e84de152f4e56d9eecb22d2f",

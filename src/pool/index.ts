@@ -23,7 +23,7 @@ export type ClaimStep =
   | { kind: 'balance'; address: `0x${string}`; balanceWei: bigint };
 
 // Browser workers require a reachable HTTPS devnet. Loopback testing belongs to protocol/ CLI.
-export const config: { chainId: number; ethrexRpc: string; mempoolRpc: string; explorer: string; pool: Hex } = deployment as typeof config;
+export const config: { chainId: number; ethrexRpc: string; mempoolRpc: string; explorer: string; pool: Hex; poolCodeHash: Hex } = deployment as typeof config;
 const poseidon = await buildPoseidon();
 export const hash = (...inputs: bigint[]): bigint => BigInt(poseidon.F.toString(poseidon(inputs)));
 const hex32 = (n: bigint): Hex => toHex(n, { size: 32 });

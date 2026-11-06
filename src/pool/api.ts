@@ -1,4 +1,4 @@
-import { encodeFunctionData, isAddress, toHex, type Hex } from 'viem'
+import { encodeFunctionData, isAddress, keccak256, toHex, type Hex } from 'viem'
 import { claim, config, confirmClaimPayment, hash, createNote, deposit, encodeNoteLink, decodeNoteLink, getBalance, type ClaimStep, type Note, type RpcTransport } from './index.ts'
 import { rpc } from './network.ts'
 import { assertNoteSession, captureNoteSession, listStoredNotes, mutateStoredNotes, reconcileNotes, type StoredNote, type NoteSession } from './notes.ts'
@@ -40,6 +40,8 @@ export function createPoolApi(route: PrivateRpc) {
       const poolCode = await rpc<Hex>(config.mempoolRpc, 'eth_getCode', [config.pool, 'latest'], operationTransport)
       if (!/^0x(?:[0-9a-f]{2})+$/i.test(poolCode) || /^0x0+$/i.test(poolCode))
         throw new Error('Pool contract is unavailable on this devnet. Do not deposit; refresh deployment details.')
+      if (keccak256(poolCode).toLowerCase() !== config.poolCodeHash.toLowerCase())
+        throw new Error('Pool contract code differs from the reviewed deployment. Do not deposit; refresh deployment details.')
       const results: StoredNote[] = []
       for (let i = 0; i < count; i++) {
         assertNoteSession(session)

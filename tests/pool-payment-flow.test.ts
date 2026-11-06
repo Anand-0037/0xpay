@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import { encodeAbiParameters, encodeEventTopics, keccak256, toHex, type Hex } from 'viem'
 import { generatePrivateKey } from 'viem/accounts'
 import { webcrypto } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { claimEvent, depositEvent, nativeTransferEvent, NATIVE_TRANSFER_ADDRESS, NOTE_VALUE, type ClaimIntent, type DepositIntent, type PaymentReceipt, type PreparedPayment } from '../src/pool/payment-records.ts'
 import { config, confirmClaimPayment, createNote, deposit, type RpcTransport } from '../src/pool/index.ts'
 import { createPoolApi } from '../src/pool/api.ts'
@@ -12,6 +13,8 @@ import { createLocalWallet, lockLocalWallet } from '../src/wallet/lifecycle.ts'
 import type { PrivateRpc } from '../src/rpc.ts'
 
 const recipient = `0x${'3'.repeat(40)}` as Hex, sender = `0x${'1'.repeat(40)}` as Hex
+const reviewedPoolCode = readFileSync(new URL('./fixtures/pool-runtime.hex', import.meta.url), 'utf8').trim() as Hex
+assert.equal(keccak256(reviewedPoolCode), config.poolCodeHash)
 const transactionHash = `0x${'a'.repeat(64)}` as Hex, blockHash = `0x${'b'.repeat(64)}` as Hex
 test('deposit signs and saves its exact hash before its first synthetic broadcast', async () => {
   const note = createNote(config.pool, config.chainId)
@@ -94,7 +97,7 @@ test('API keeps the encrypted prepared deposit hash when its submission response
   let submissions = 0
   const route = { fetchRpc: async (body: string) => {
     const request = JSON.parse(body) as { id: number; method: string; params: Hex[] }
-    if (request.method === 'eth_getCode') return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: '0x6000' }))
+    if (request.method === 'eth_getCode') return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: reviewedPoolCode }))
     if (request.method === 'eth_getTransactionCount') return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: '0x0' }))
     if (request.method === 'eth_sendRawTransaction') {
       submissions++
@@ -131,7 +134,7 @@ test('pre-signing deposit failure removes its orphan note and never broadcasts',
   let broadcasts = 0
   const route = { fetchRpc: async (body: string) => {
     const request = JSON.parse(body) as { id: number; method: string }
-    if (request.method === 'eth_getCode') return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: '0x6000' }))
+    if (request.method === 'eth_getCode') return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: reviewedPoolCode }))
     if (request.method === 'eth_getTransactionCount') throw new Error('Private route failed before signing')
     if (request.method === 'eth_sendRawTransaction') broadcasts++
     throw new Error(`Unexpected fixture request: ${request.method}`)
@@ -144,7 +147,10 @@ test('pre-signing deposit failure removes its orphan note and never broadcasts',
 })
 
 
-test('devnet reset blocks value-bearing deposit before a note or transaction exists', async () => {
+for (const [scenario, code, message] of [
+  ['missing pool', '0x', /Pool contract is unavailable/],
+  ['different pool code', '0x6000', /Pool contract code differs/],
+] as const) test(`${scenario} blocks value-bearing deposit before a note or transaction exists`, async () => {
   const storage = new Map<string, string>()
   Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true })
   Object.defineProperty(globalThis, 'localStorage', { value: {
@@ -157,10 +163,10 @@ test('devnet reset blocks value-bearing deposit before a note or transaction exi
     const request = JSON.parse(body) as { id: number; method: string }
     methods.push(request.method)
     if (request.method !== 'eth_getCode') throw new Error(`Unexpected request ${request.method}`)
-    return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: '0x' }))
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: code }))
   } } as unknown as PrivateRpc
   try {
-    await assert.rejects(createPoolApi(route).depositNotes(1), /Pool contract is unavailable/)
+    await assert.rejects(createPoolApi(route).depositNotes(1), message)
     assert.deepEqual(methods, ['eth_getCode'])
     assert.deepEqual(await listStoredNotes(), [])
   } finally { await lockLocalWallet() }

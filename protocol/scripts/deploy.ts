@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { encodeFunctionData, type Hex } from 'viem';
+import { encodeFunctionData, keccak256, type Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { deployArtifact, fund, rpc, GATEWAY, EXPLORER } from '../client/src/node.js';
 
@@ -24,6 +24,8 @@ const stakeRaw = await rpc<Hex>(GATEWAY, 'eth_call', [{ to: registry, data }, 'l
 const stake = BigInt(`0x${stakeRaw.slice(2, 66)}`);
 if (stake < 12_000_000_000_000_000n) throw new Error(`Stake too low: ${stake}`);
 console.log('registry stake wei', stake.toString());
-const config = { chainId: 1337, ethrexRpc: 'https://altmempool.forshtat.com', mempoolRpc: GATEWAY, explorer: EXPLORER, pool: pool.address, poseidon: poseidon.address, verifier: verifier.address, registry, deployer: address, deployHash: pool.hash };
+const poolCode = await rpc<Hex>(GATEWAY, 'eth_getCode', [pool.address, 'latest']);
+if (!/^0x(?:[0-9a-f]{2})+$/i.test(poolCode) || /^0x0+$/i.test(poolCode)) throw new Error('Deployed pool code is unavailable');
+const config = { chainId: 1337, ethrexRpc: 'https://altmempool.forshtat.com', mempoolRpc: GATEWAY, explorer: EXPLORER, pool: pool.address, poolCodeHash: keccak256(poolCode), poseidon: poseidon.address, verifier: verifier.address, registry, deployer: address, deployHash: pool.hash };
 await writeFile(join(root, 'deployments', 'devnet.json'), `${JSON.stringify(config, null, 2)}\n`);
 console.log('deployment', join(root, 'deployments', 'devnet.json'));

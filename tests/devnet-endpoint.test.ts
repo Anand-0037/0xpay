@@ -10,6 +10,7 @@ test('wallet routing and protocol metadata use the same normal mining sidecar an
   assert.equal(protocol.mempoolRpc, MEMPOOL_RPC_URL)
   assert.equal(wallet.ethrexRpc, APP_RPC_URL)
   assert.equal(protocol.pool, wallet.pool)
+  assert.equal(protocol.poolCodeHash, wallet.poolCodeHash)
   assert.equal(new URL(MEMPOOL_RPC_URL).origin, new URL(APP_RPC_URL).origin)
   assert.equal(new URL(MEMPOOL_RPC_URL).pathname, '/rpc')
   assert.equal(wallet.chainId, 1337)
