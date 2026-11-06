@@ -1,16 +1,19 @@
 import { AnonRpcWorker } from '@anon-rpc/browser-harness'
+import { AbiCoder } from 'ethers'
+import { setWorkerBundleResolvers } from './net/network-guard.ts'
 
 const BOOTSTRAP_RPC_URL = 'https://ethereum-rpc.publicnode.com'
 export const APP_RPC_URL = 'https://ethereum-sepolia-rpc.publicnode.com'
 const NYM_SPECIFIER = '0x3aCD9742C68F6d993066Ae25533e09b9e1f60eD0'
 const BOOTSTRAP_SELECTORS = new Set(['0x3898587d', '0x1c67ff29'])
+const WORKER_RESOLVERS_SELECTOR = '0x1c67ff29'
 const READ_TIMEOUT_MS = 60_000
 let nextId = 1
 
 export type RouteStats = Readonly<{ attempted: number; completed: number; failed: number; bootstrapReads: number }>
 export type RouteStatus = 'connecting' | 'ready' | 'degraded' | 'failed' | 'closed'
 type Worker = { ready: Promise<unknown>; fetch: (url: string, init: RequestInit) => Promise<Response>; close: () => void }
-type WorkerFactory = (onBootstrap: () => void) => Worker
+type WorkerFactory = (onBootstrap: (selector: string, result: unknown) => void) => Worker
 
 async function bootstrapRequest({ method, params }: { method: string; params?: unknown[] }) {
   const call = params?.[0]
@@ -38,16 +41,25 @@ export class PrivateRpc {
   private completed = 0
   private failed = 0
   private bootstrapReads = 0
+  private resolverUrls = new Set<string>()
   constructor(workerFactory: WorkerFactory = (onBootstrap) => new AnonRpcWorker({
     address: NYM_SPECIFIER, preExisting: { rpcProvider: { request: async (payload: { method: string; params?: unknown[] }) => {
       const result = await bootstrapRequest(payload)
-      onBootstrap()
+      onBootstrap(payload.params?.[0] && typeof payload.params[0] === 'object' && 'data' in payload.params[0] && typeof payload.params[0].data === 'string' ? payload.params[0].data : '', result)
       return result
     } } },
   }) as Worker) {
     this.workerFactory = workerFactory
-    this.worker = workerFactory(() => { this.bootstrapReads += 1 })
+    this.worker = workerFactory((selector, result) => this.recordBootstrap(selector, result))
   }
+  private recordBootstrap(selector: string, result: unknown) {
+    this.bootstrapReads += 1
+    if (selector !== WORKER_RESOLVERS_SELECTOR || typeof result !== 'string') return
+    const [urls] = AbiCoder.defaultAbiCoder().decode(['string[]'], result) as unknown as [string[]]
+    this.resolverUrls = new Set(urls.filter((url) => url.startsWith('https://')))
+    setWorkerBundleResolvers([...this.resolverUrls])
+  }
+  get approvedBundleResolvers() { return [...this.resolverUrls] }
   get status(): RouteStatus { return this.statusValue }
   async connect() {
     if (this.statusValue === 'closed') throw new Error('Private RPC route is closed')
@@ -75,7 +87,9 @@ export class PrivateRpc {
     if (this.statusValue === 'closed') throw new Error('Private RPC route is closed')
     this.generation += 1
     this.worker.close()
-    this.worker = this.workerFactory(() => { this.bootstrapReads += 1 })
+    this.resolverUrls.clear()
+    setWorkerBundleResolvers([])
+    this.worker = this.workerFactory((selector, result) => this.recordBootstrap(selector, result))
     this.statusValue = 'connecting'
     return this.connect()
   }
