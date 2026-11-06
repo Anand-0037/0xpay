@@ -26,7 +26,19 @@ export default function App() {
     catch (error) { if (error instanceof PrivateRpcLifecycleError) return; if (rpcRef.current === client) setRoute({ status: 'failed', message: String(error), stats: client.stats }) }
   }, [])
   useEffect(() => { const client = new PrivateRpc(undefined, privacyNetwork, chainNetwork); rpcRef.current = client; queueMicrotask(() => { if (rpcRef.current === client) { setRpc(client); void connect(client) } }); return () => { client.close(); rpcRef.current = null } }, [privacyNetwork, chainNetwork, connect])
-  useEffect(() => { if (!rpc) return; const timer = window.setInterval(() => { if (rpc.status === 'degraded' || rpc.status === 'failed' || rpc.status === 'closed') setRoute(previous => previous.status === 'failed' || previous.status === 'disconnected' ? previous : { status: 'failed', stats: rpc.stats, message: rpc.failure?.message ?? 'Private connection interrupted. Reconnect to continue.' }) }, 500); return () => window.clearInterval(timer) }, [rpc])
+  useEffect(() => {
+    if (!rpc) return
+    const timer = window.setInterval(() => {
+      const stats = rpc.stats
+      setRoute(previous => {
+        if ((rpc.status === 'degraded' || rpc.status === 'failed' || rpc.status === 'closed') && previous.status !== 'failed' && previous.status !== 'disconnected')
+          return { status: 'failed', stats, message: rpc.failure?.message ?? 'Private connection interrupted. Reconnect to continue.' }
+        if (previous.stats.attempted === stats.attempted && previous.stats.completed === stats.completed && previous.stats.failed === stats.failed && previous.stats.bootstrapReads === stats.bootstrapReads) return previous
+        return { ...previous, stats }
+      })
+    }, 500)
+    return () => window.clearInterval(timer)
+  }, [rpc])
   // A route failure blocks the API's transport but must not destroy payment progress.
   const api = useMemo(() => rpc ? createPayApi(rpc) : null, [rpc])
   const changeNetwork = (next: PrivacyNetwork) => { const url = new URL(window.location.href); url.searchParams.set('network', next); window.location.assign(url.href) }

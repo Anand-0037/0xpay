@@ -25,7 +25,7 @@ function Stepper({ steps, count = 1 }: { steps: ClaimStep[]; count?: number }) {
       <div className={canonical ? canonical.accepted ? 'warn' : 'done' : ''}><span className="px-step-dot" /><div><strong>Public mempool {canonical ? canonical.accepted ? 'ACCEPTED' : 'REJECTED' : 'check'}</strong><small>{canonical ? canonical.reason : 'Awaiting real response'}</small>{canonical && !canonical.accepted && <small>Canonical rules limit validation gas and payer storage access.</small>}</div></div>
       <div className={alt ? alt.accepted ? 'done' : 'warn' : ''}><span className="px-step-dot" /><div><strong>Alt mempool {alt ? alt.accepted ? 'ADMITTED' : 'REJECTED' : 'submission'}</strong><small>{alt?.reason ?? (alt?.txHash ? short(alt.txHash) : 'Awaiting real response')}</small></div></div>
       <div className={included ? 'done' : ''}><span className="px-step-dot" /><div><strong>{included ? `Included in block ${included.blockNumber}` : 'Inclusion'}</strong>{included && <a href={included.explorerUrl} target="_blank" rel="noopener noreferrer">Open explorer · search hash ↗</a>}</div></div>
-      <div className={balance ? 'done' : ''}><span className="px-step-dot" /><div><strong>Recipient balance</strong><small>{balance ? `${formatEth(balance.balanceWei)} ETH · ${short(balance.address)}` : 'Waiting for chain balance'}</small></div></div>
+      <div className={balance ? 'done' : ''}><span className="px-step-dot" /><div><strong>Recipient balance</strong><small>{balance ? `${formatEth(balance.balanceWei, 8)} ETH · ${short(balance.address)}` : 'Waiting for chain balance'}</small></div></div>
     </section>
   })}</div>
 }
@@ -130,6 +130,12 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
   const sendQuote = api.getClaimQuote?.(count)
   const claimQuote = api.getClaimQuote?.(1)
   const claimFragment = window.location.hash.startsWith('#claim=') ? window.location.href : ''
+  const dashboardErrors = { ...dataErrors }
+  if (!connectionReady && connectionMessage) {
+    for (const key of ['publicBalance', 'privateBalance', 'notes', 'tokens'] as const) {
+      if (data[key] === null) dashboardErrors[key] = true
+    }
+  }
 
   return <div className={`px-app px-${theme}`}>
     {simulated && <div className="px-simulated" role="status">SIMULATED · Visual preview only. No chain transactions.</div>}
@@ -137,7 +143,7 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
     <header className="px-header"><button disabled={busy} className="px-brand" onClick={() => navigate('dashboard')} aria-label="0xPay dashboard"><img src={logo} alt="" /><span>0xPay<small>PRIVATE WALLET</small></span></button><nav aria-label="Wallet navigation"><button disabled={busy} aria-current={screen === 'dashboard' ? 'page' : undefined} onClick={() => navigate('dashboard')}>Overview</button><button disabled={busy} aria-current={screen === 'send' ? 'page' : undefined} onClick={() => navigate('send')}>Send</button><button disabled={busy} aria-current={screen === 'link' || screen === 'claim' ? 'page' : undefined} onClick={() => navigate('link')}>Links</button></nav><div className="px-header-end"><span className={`px-route ${privateRouteReady ? 'px-route-ok' : 'px-route-direct'}`} title={route.calls === null ? 'Route statistics unavailable' : `${route.calls} routed calls · ${route.direct} direct calls`}><i />{!connectionReady ? 'Private connection unavailable' : route.kind === 'anon-rpc' && route.worker ? `Private route · Anon-RPC ${route.worker.toUpperCase()}` : route.kind === 'direct' ? 'Direct RPC route' : 'Route status unavailable'}</span><button className="px-theme-button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>{theme === 'dark' ? '☼' : '◐'}</button></div></header>
     <main className="px-main" aria-busy={busy}>
       {screen === 'dashboard' && <>
-        <Dashboard data={data} errors={dataErrors} onNavigate={navigate} onRetry={refresh} canRetry={connectionReady && !busy} />
+        <Dashboard data={data} errors={dashboardErrors} onNavigate={navigate} onRetry={refresh} canRetry={connectionReady && !busy} />
         {pendingPayments.length > 0 && <section className="px-flow-card" aria-label="Payments awaiting verification">
           <h2>Check existing payments</h2>
           <p>A previous response was lost or verification did not finish. These notes remain reserved. Checking reads the exact saved transaction; it never sends again.</p>
