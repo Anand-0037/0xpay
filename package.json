@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "api": "node --env-file-if-exists=.env.server server/index.ts",
+    "start": "node --env-file-if-exists=.env.server server/index.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "test": "tsx --tsconfig tsconfig.app.json --test tests/*.test.ts",
