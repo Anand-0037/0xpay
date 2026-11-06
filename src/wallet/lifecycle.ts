@@ -1,6 +1,7 @@
 import { HDNodeWallet, Mnemonic, randomBytes } from 'ethers'
 import { openVault, sealMnemonic, type StoredVault } from './vault.ts'
 import { SessionGate } from './session.ts'
+import { walletStorageError } from './storage-error.ts'
 
 export type WalletSession = { id: string; railgunAddress: string; publicAddress: string; backupConfirmed: boolean; generation: number }
 const STORAGE_KEY = '0xpay.vault.v1'
@@ -68,21 +69,6 @@ async function railgunWallet(vault: StoredVault, mnemonic: string, sdkKey: strin
   const [{ createRailgunWallet, loadWalletByID, unloadWalletByID, getEngine, fromUTF8String }, { NetworkName }] = await Promise.all([
     import('@railgun-community/wallet'), import('@railgun-community/shared-models'),
   ])
-  const storageFailure = (cause: unknown) => {
-    let current = cause
-    const seen = new Set<unknown>()
-    let writeFailure = false
-    while (current instanceof Error && !seen.has(current)) {
-      seen.add(current)
-      if (current.message.includes('Failed to put value in database')) writeFailure = true
-      current = current.cause
-    }
-    const error = new Error(writeFailure
-      ? 'Wallet storage could not be written. Check available disk space and site-storage permissions, then reload and retry unlocking.'
-      : 'Wallet storage could not be loaded. Reload this tab and retry unlocking.', { cause })
-    Object.assign(error, { code: writeFailure ? 'WALLET_STORAGE_WRITE_FAILED' : 'WALLET_STORAGE_LOAD_FAILED' })
-    return error
-  }
   if (vault.walletId) {
     let recordMissing = false
     try {
@@ -91,7 +77,7 @@ async function railgunWallet(vault: StoredVault, mnemonic: string, sdkKey: strin
       await getEngine().db.get([fromUTF8String('wallet'), vault.walletId], 'json')
     } catch (cause) {
       recordMissing = typeof cause === 'object' && cause !== null && 'notFound' in cause && cause.notFound === true
-      if (!recordMissing) { unloadWalletByID(vault.walletId); throw storageFailure(cause) }
+      if (!recordMissing) { unloadWalletByID(vault.walletId); throw walletStorageError(cause) }
     }
     // A previous SDK attachment failure may have registered a partial wallet.
     // Unload only its in-memory object; this does not delete stored wallet data.
@@ -100,7 +86,7 @@ async function railgunWallet(vault: StoredVault, mnemonic: string, sdkKey: strin
       try { return await loadWalletByID(sdkKey, vault.walletId, false) }
       catch (cause) {
         unloadWalletByID(vault.walletId)
-        throw storageFailure(cause)
+        throw walletStorageError(cause)
       }
     }
   }
@@ -117,7 +103,7 @@ async function railgunWallet(vault: StoredVault, mnemonic: string, sdkKey: strin
     // createWallet also registers before awaiting UTXO attachment. Remove only
     // new in-memory entries created by this serialized lifecycle operation.
     for (const id of Object.keys(getEngine().wallets)) if (!previouslyLoaded.has(id)) unloadWalletByID(id)
-    throw storageFailure(cause)
+    throw walletStorageError(cause)
   }
 }
 

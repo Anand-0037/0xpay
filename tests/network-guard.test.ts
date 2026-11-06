@@ -6,7 +6,7 @@ const origin = 'https://wallet.example'
 const rpc = 'https://ethereum-sepolia-rpc.publicnode.com'
 const bootstrap = 'https://ethereum-rpc.publicnode.com'
 const specifier = '0x3aCD9742C68F6d993066Ae25533e09b9e1f60eD0'
-const safeBootstrap = JSON.stringify({ jsonrpc: '2.0', method: 'eth_call', params: [{ to: specifier, data: '0x1c67ff29' }, 'latest'] })
+const safeBootstrap = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to: specifier, data: '0x1c67ff29' }, 'latest'] })
 
 test('direct application RPC and unknown hosts are blocked', () => {
   assert.equal(classifyOutgoingRequest(rpc, 'POST', '{}', origin), 'blocked')
@@ -27,6 +27,18 @@ test('approved bundle URL must match exactly and use GET', () => {
   assert.equal(classifyOutgoingRequest(`${url}?address=0x123`, 'GET', null, origin), 'blocked')
   assert.equal(classifyOutgoingRequest(url, 'POST', null, origin), 'blocked')
   setWorkerBundleResolvers([])
+})
+
+test('lending blocks payment-only services; only the explicit wallet entry permits them', () => {
+  const destinations = [
+    ['https://ppoi.fdi.network/', 'POST', 'poi'],
+    ['https://ipfs-lb.com/ipfs/public-proof-file', 'GET', 'artifacts'],
+    ['https://rail-squid.squids.live/squid-railgun-eth-sepolia-v2/graphql', 'POST', 'indexer'],
+  ] as const
+  for (const [url, method, kind] of destinations) {
+    assert.equal(classifyOutgoingRequest(url, method, '{}', origin), 'blocked')
+    assert.equal(classifyOutgoingRequest(url, method, '{}', origin, new Set(), true), kind)
+  }
 })
 
 test('guard never sends a direct app RPC request', async () => {

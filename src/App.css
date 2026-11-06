@@ -30,6 +30,10 @@
 }
 .brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; font-size: 23px; font-weight: 760; letter-spacing: -.055em; white-space: nowrap; }
 .brand img { display: block; width: 46px; height: 46px; border-radius: 9px; object-fit: cover; }
+.app-navigation { display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 999px; }
+.app-navigation a { padding: 8px 12px; border-radius: 999px; color: var(--muted); text-decoration: none; font-size: 12px; }
+.app-navigation a[aria-current="page"] { background: var(--raised); color: var(--ink); font-weight: 650; }
+.app-navigation a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .network-context { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .wallet-status { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .route-chip {
@@ -387,6 +391,8 @@
   .network-context { margin-left: 0; font-size: 11px; }
   .wallet-status { display: none; }
   .route-chip { order: 3; flex: 0 0 100%; max-width: none; }
+  .app-navigation { order: 2; }
+  .app-navigation a { padding: 7px 9px; font-size: 11px; }
   .wallet-main { padding: 26px 16px 70px; }
   .wallet-panel { padding: 26px 20px; border-radius: 17px; }
   .wallet-panel h2 { font-size: 31px; }

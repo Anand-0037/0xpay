@@ -1,13 +1,9 @@
 import { AnonRpcWorker } from '@anon-rpc/browser-harness'
 import { AbiCoder } from 'ethers'
 import { setWorkerBundleResolvers } from './net/network-guard.ts'
+import { APP_RPC_URL, AGENT_RPC_URL, PRIVACY_NETWORKS, workerBootstrapParams, type PrivacyNetwork } from './rpc/networks.ts'
+export { APP_RPC_URL, PRIVACY_NETWORKS, privacyNetworkFromSearch, type PrivacyNetwork } from './rpc/networks.ts'
 
-const BOOTSTRAP_RPC_URL = 'https://ethereum-rpc.publicnode.com'
-export const APP_RPC_URL = 'https://ethereum-sepolia-rpc.publicnode.com'
-// Published Nym specifier in the official Anon-RPC network catalogue:
-// https://ethereum.github.io/anon-rpc/adopters/
-const NYM_SPECIFIER = '0x3aCD9742C68F6d993066Ae25533e09b9e1f60eD0'
-const BOOTSTRAP_SELECTORS = new Set(['0x3898587d', '0x1c67ff29'])
 const WORKER_RESOLVERS_SELECTOR = '0x1c67ff29'
 const READ_TIMEOUT_MS = 60_000
 // A cold mixnet worker can need substantially longer than a warm RPC request.
@@ -26,7 +22,7 @@ type WorkerFactory = (onBootstrap: (selector: string, result: unknown) => void) 
 // Keep telemetry bounded to known method names. Never retain params, IDs, raw
 // transaction bytes, or arbitrary strings supplied as a JSON-RPC method.
 const COUNTED_METHODS = new Set([
-  'eth_chainId', 'eth_blockNumber', 'eth_getBalance', 'eth_call', 'eth_getLogs',
+  'eth_chainId', 'eth_blockNumber', 'eth_getBalance', 'eth_getCode', 'eth_call', 'eth_getLogs',
   'eth_getBlockByNumber', 'eth_getBlockByHash', 'eth_getTransactionByHash',
   'eth_getTransactionReceipt', 'eth_getTransactionCount', 'eth_gasPrice',
   'eth_maxPriorityFeePerGas', 'eth_feeHistory', 'eth_estimateGas',
@@ -46,18 +42,14 @@ function countedMethods(body: string | Uint8Array): string[] {
   } catch { return ['other'] }
 }
 
-async function bootstrapRequest({ method, params }: { method: string; params?: unknown[] }) {
-  const call = params?.[0]
-  if (method !== 'eth_call' || typeof call !== 'object' || call === null || !('to' in call) || !('data' in call) ||
-    typeof call.to !== 'string' || typeof call.data !== 'string' ||
-    call.to.toLowerCase() !== NYM_SPECIFIER.toLowerCase() || !BOOTSTRAP_SELECTORS.has(call.data) || params?.[1] !== 'latest') {
-    throw new Error('Direct RPC is reserved for worker bootstrap')
-  }
+async function bootstrapRequest(value: unknown, network: PrivacyNetwork) {
+  const params = workerBootstrapParams(value, network)
+  if (!params) throw new Error('Direct RPC is reserved for worker bootstrap')
   const id = nextId++
-  const response = await fetch(BOOTSTRAP_RPC_URL, {
+  const response = await fetch(PRIVACY_NETWORKS[network].bootstrapRpc, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     signal: AbortSignal.timeout(30_000),
-    body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
+    body: JSON.stringify({ jsonrpc: '2.0', id, method: 'eth_call', params }),
   })
   if (!response.ok) throw new Error(`Bootstrap RPC returned HTTP ${response.status}`)
   const payload: unknown = await response.json()
@@ -70,6 +62,9 @@ async function bootstrapRequest({ method, params }: { method: string; params?: u
 }
 
 export class PrivateRpc {
+  readonly network: PrivacyNetwork
+  readonly chain: 'sepolia' | 'polygon-readonly'
+  readonly rpcUrl: string
   private readonly workerFactory: WorkerFactory
   private worker: Worker
   private workerClosed = false
@@ -81,14 +76,19 @@ export class PrivateRpc {
   private bootstrapReads = 0
   private methodCounts = new Map<string, { attempted: number; completed: number; failed: number }>()
   private resolverUrls = new Set<string>()
-  constructor(workerFactory: WorkerFactory = (onBootstrap) => new AnonRpcWorker({
-    address: NYM_SPECIFIER, preExisting: { rpcProvider: { request: async (payload: { method: string; params?: unknown[] }) => {
-      const result = await bootstrapRequest(payload)
-      onBootstrap(payload.params?.[0] && typeof payload.params[0] === 'object' && 'data' in payload.params[0] && typeof payload.params[0].data === 'string' ? payload.params[0].data : '', result)
-      return result
-    } } },
-  }) as Worker) {
-    this.workerFactory = workerFactory
+  constructor(workerFactory?: WorkerFactory, network: PrivacyNetwork = 'nym', chain: 'sepolia' | 'polygon-readonly' = 'sepolia') {
+    if (chain !== 'sepolia' && chain !== 'polygon-readonly') throw new Error('Unsupported private RPC chain')
+    this.network = network
+    this.chain = chain
+    this.rpcUrl = chain === 'polygon-readonly' ? AGENT_RPC_URL : APP_RPC_URL
+    this.workerFactory = workerFactory ?? ((onBootstrap) => new AnonRpcWorker({
+      address: PRIVACY_NETWORKS[network].specifier, preExisting: { rpcProvider: { request: async (payload: { method: string; params?: unknown[] }) => {
+        const result = await bootstrapRequest(payload, network)
+        const params = workerBootstrapParams(payload, network)!
+        onBootstrap(params[0].data, result)
+        return result
+      } } },
+    }) as Worker)
     this.worker = this.makeWorker()
   }
   private makeWorker() {
@@ -120,14 +120,14 @@ export class PrivateRpc {
     try {
       await Promise.race([
         this.worker.ready,
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Nym connection timed out')), CONNECT_TIMEOUT_MS) }),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${PRIVACY_NETWORKS[this.network].label} connection timed out`)), CONNECT_TIMEOUT_MS) }),
       ])
       // A replaced worker may finish starting after Reconnect has installed a
       // new one. Its old startup must never issue requests on the new route.
       if (generation !== this.generation) throw new Error('Private RPC connection was replaced')
       const chainId = await this.readHex('eth_chainId')
       if (generation !== this.generation) throw new Error('Private RPC connection was replaced')
-      if (chainId.toLowerCase() !== '0xaa36a7') throw new Error(`Unexpected chain ${chainId}`)
+      if (chainId.toLowerCase() !== (this.chain === 'polygon-readonly' ? '0x89' : '0xaa36a7')) throw new Error(`Unexpected chain ${chainId}`)
       const blockNumber = Number.parseInt(await this.readHex('eth_blockNumber'), 16)
       if (generation !== this.generation) throw new Error('Private RPC connection was replaced')
       this.statusValue = 'ready'
@@ -175,6 +175,15 @@ export class PrivateRpc {
   }
   async fetchRpc(body: string | Uint8Array): Promise<Response> {
     if (this.statusValue !== 'ready' && this.statusValue !== 'connecting') throw new Error('Private RPC route needs reconnecting')
+    if (this.chain === 'polygon-readonly') {
+      const value: unknown = JSON.parse(typeof body === 'string' ? body : new TextDecoder().decode(body))
+      const calls: unknown[] = Array.isArray(value) ? value : [value]
+      const allowed = new Set(['eth_chainId', 'eth_blockNumber', 'eth_getBlockByNumber', 'eth_getBalance', 'eth_getCode', 'eth_call'])
+      if (!calls.length || calls.length > 32 || calls.some(call => !call || typeof call !== 'object' ||
+        !('method' in call) || typeof call.method !== 'string' || !allowed.has(call.method))) {
+        throw new Error('The agent Polygon connection permits read-only RPC methods only')
+      }
+    }
     const generation = this.generation
     const worker = this.worker
     const methods = countedMethods(body)
@@ -185,7 +194,7 @@ export class PrivateRpc {
     try {
       const response = await Promise.race([
         (async () => {
-          const result = await worker.fetch(APP_RPC_URL, {
+          const result = await worker.fetch(this.rpcUrl, {
             method: 'POST', headers: { 'content-type': 'application/json' }, signal: controller.signal,
             body: typeof body === 'string' ? body : new Uint8Array(body).buffer,
           })

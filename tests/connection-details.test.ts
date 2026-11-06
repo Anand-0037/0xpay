@@ -56,6 +56,9 @@ test('connection drawer keeps diagnostics collapsed and traps/restores keyboard 
     assert.equal(document.body.style.overflow, 'hidden')
     assert.equal(summary.textContent, 'Technical details')
     assert.match(dialog.querySelector('#connection-explanation')!.textContent!, /If the connection fails, requests stop/)
+    assert.match(dialog.textContent!, /Connected through Nym/)
+    assert.match(technical.textContent!, /Nym via Anon-RPC/)
+    assert.equal(dialog.querySelector('select'), null, 'network selection remains optional for legacy callers')
     assert.match(technical.textContent!, /private-diagnostic.example/)
     assert.match(technical.textContent!, /does not establish RPC success or transaction settlement/)
     assert.equal(document.activeElement, close)
@@ -98,5 +101,48 @@ test('connection failure shows a simple reconnect action with raw errors inside 
     flushSync(() => reconnect.click())
     assert.equal(retries, 1)
     assert.equal([...dialog.querySelectorAll('button')].some((button) => button.textContent === 'Disconnect private route'), false)
+  } finally { await cleanup() }
+})
+
+test('lending connection is independent of wallet services and exposes disconnect while engine is waiting', async () => {
+  const { dom, root, cleanup } = environment()
+  let disconnected = 0
+  try {
+    flushSync(() => root.render(createElement(ConnectionDetails, { ...base, open: true, context: 'lending',
+      engine: { status: 'waiting' }, onClose() {}, onDisconnect() { disconnected++ } })))
+    const dialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"]')!
+    assert.doesNotMatch(dialog.textContent!, /Preparing your wallet|Waiting for private route/)
+    assert.match(dialog.textContent!, /Position queries use Nym/)
+    assert.match(dialog.textContent!, /does not start RAILGUN/)
+    const disconnect = [...dialog.querySelectorAll('button')].find((button) => button.textContent === 'Disconnect private route')!
+    assert.ok(disconnect)
+    flushSync(() => disconnect.click())
+    assert.equal(disconnected, 1)
+  } finally { await cleanup() }
+})
+
+test('Nox connection labels reflect the selected network and controlled selector requests only private networks', async () => {
+  const { dom, root, cleanup } = environment()
+  const changes: string[] = []
+  try {
+    const props = { ...base, open: true, context: 'lending' as const, privacyNetwork: 'nox' as const,
+      onClose() {}, onNetworkChange(network: 'nox' | 'nym') { changes.push(network) } }
+    flushSync(() => root.render(createElement(ConnectionDetails, props)))
+    const dialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"]')!
+    const select = dialog.querySelector<HTMLSelectElement>('#privacy-network')!
+    assert.equal(dialog.querySelector('label[for="privacy-network"]')?.textContent, 'Privacy network')
+    assert.equal(select.value, 'nox')
+    assert.deepEqual([...select.options].map(option => option.value), ['nox', 'nym'])
+    assert.match(dialog.textContent!, /Connected through Nox/)
+    assert.match(dialog.textContent!, /Nox via Anon-RPC/)
+    assert.match(dialog.querySelector('#connection-explanation')!.textContent!, /Position queries use Nox/)
+    assert.match(dialog.querySelector('#connection-explanation')!.textContent!, /Your onchain position stays public/)
+    assert.doesNotMatch(dialog.textContent!, /Connected through Nym|Nym via Anon-RPC|Position queries use Nym/)
+    flushSync(() => { select.value = 'nym'; select.dispatchEvent(new dom.window.Event('change', { bubbles: true })) })
+    assert.deepEqual(changes, ['nym'])
+    assert.equal(select.value, 'nox', 'parent controls network selection until connection is reloaded')
+    flushSync(() => root.render(createElement(ConnectionDetails, { ...props, route: { ...base.route, status: 'connecting' } })))
+    assert.match(dialog.querySelector('[role="status"]')!.textContent!, /Connecting through Nox/)
+    assert.match(dialog.textContent!, /A successful response alone is not proof of anonymity/)
   } finally { await cleanup() }
 })

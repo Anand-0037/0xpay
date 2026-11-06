@@ -1,12 +1,14 @@
 import { useEffect, useRef } from 'react'
 import type { RouteStats } from '../rpc'
+import { PRIVACY_NETWORKS, type PrivacyNetwork } from '../rpc/networks'
 import type { TrafficEntry, TrafficKind } from '../net/network-guard'
 
 type Route = { status: 'connecting' | 'ready' | 'failed'; stats: RouteStats; message?: string; blockNumber?: number }
 type Engine = { status: 'waiting' | 'starting' | 'ready' | 'failed'; message?: string; shieldFeeBasisPoints?: bigint; reload?: boolean }
 
-export function ConnectionDetails({ open, route, engine, traffic, onClose, onReconnect, onDisconnect }: {
-  open: boolean; route: Route; engine: Engine; traffic: { counts: Record<TrafficKind, number>; recent: TrafficEntry[] }; onClose: () => void; onReconnect: () => void; onDisconnect: () => void
+export function ConnectionDetails({ open, route, engine, traffic, onClose, onReconnect, onDisconnect, context = 'payments', privacyNetwork = 'nym', onNetworkChange }: {
+  open: boolean; route: Route; engine: Engine; traffic: { counts: Record<TrafficKind, number>; recent: TrafficEntry[] }; onClose: () => void; onReconnect: () => void; onDisconnect: () => void; context?: 'lending' | 'payments'
+  privacyNetwork?: PrivacyNetwork; onNetworkChange?: (network: PrivacyNetwork) => void
 }) {
   const closeButton = useRef<HTMLButtonElement>(null)
   const drawer = useRef<HTMLElement>(null)
@@ -57,6 +59,7 @@ export function ConnectionDetails({ open, route, engine, traffic, onClose, onRec
     }
   }, [open])
   if (!open) return null
+  const networkLabel = PRIVACY_NETWORKS[privacyNetwork].label
   const methods = Object.entries(route.stats.methodCounts ?? {})
   const readCalls = methods.filter(([method]) => method !== 'eth_sendRawTransaction' && method !== 'other')
     .reduce((total, [, count]) => ({ attempted: total.attempted + count.attempted,
@@ -67,30 +70,38 @@ export function ConnectionDetails({ open, route, engine, traffic, onClose, onRec
     <button className="connection-scrim" type="button" tabIndex={-1} aria-hidden="true" onClick={onClose} />
     <aside ref={drawer} id="connection-details" className="connection-drawer" role="dialog" aria-modal="true" aria-labelledby="connection-title" aria-describedby="connection-explanation">
       <div className="connection-top"><h2 id="connection-title">Connection</h2><button ref={closeButton} type="button" onClick={onClose} aria-label="Close connection details">×</button></div>
-      <div className={`connection-state ${route.status}`} role="status"><span className="route-dot" aria-hidden="true" /><strong>{route.status === 'ready' ? 'Connected through Nym' : route.status === 'connecting' ? 'Connecting through Nym…' : 'Connection paused'}</strong></div>
+      <div className={`connection-state ${route.status}`} role="status"><span className="route-dot" aria-hidden="true" /><strong>{route.status === 'ready' ? `Connected through ${networkLabel}` : route.status === 'connecting' ? `Connecting through ${networkLabel}…` : 'Connection paused'}</strong></div>
       <p>Ethereum Sepolia</p>
-      <p id="connection-explanation">Your wallet’s blockchain requests use Nym. If the connection fails, requests stop.</p>
-      {route.status === 'ready' && (engine.status === 'waiting' || engine.status === 'starting') && <p role="status">Preparing your wallet…</p>}
-      {(route.status === 'failed' || engine.status === 'failed') && <><p role="alert">{engine.status === 'failed' && engine.reload ? 'Refresh the app to continue.' : route.status === 'failed' ? 'Reconnect to continue using your wallet.' : 'Wallet services could not connect. Try again.'}</p><button type="button" onClick={onReconnect}>{engine.status === 'failed' && engine.reload ? 'Refresh app' : 'Reconnect'}</button></>}
+      {onNetworkChange && <div className="connection-network">
+        <label htmlFor="privacy-network">Privacy network</label>{' '}
+        <select id="privacy-network" value={privacyNetwork} onChange={(event) => {
+          const value = event.currentTarget.value
+          if ((value === 'nox' || value === 'nym') && value !== privacyNetwork) onNetworkChange(value)
+        }}><option value="nox">Nox</option><option value="nym">Nym</option></select>
+        <p>Switching reloads the private connection.</p>
+      </div>}
+      <p id="connection-explanation">{context === 'lending' ? `Position queries use ${networkLabel}. Requests reach the RPC through the selected network’s exit instead of a direct connection from this page. Your onchain position stays public.` : `Your wallet’s blockchain requests use ${networkLabel}. If the connection fails, requests stop.`}</p>
+      {context === 'payments' && route.status === 'ready' && (engine.status === 'waiting' || engine.status === 'starting') && <p role="status">Preparing your wallet…</p>}
+      {(route.status === 'failed' || (context === 'payments' && engine.status === 'failed')) && <><p role="alert">{context === 'payments' && engine.status === 'failed' && engine.reload ? 'Refresh the app to continue.' : route.status === 'failed' ? context === 'payments' ? 'Reconnect to continue using your wallet.' : 'Reconnect to continue.' : 'Wallet services could not connect. Try again.'}</p><button type="button" onClick={onReconnect}>{context === 'payments' && engine.status === 'failed' && engine.reload ? 'Refresh app' : 'Reconnect'}</button></>}
       <details style={{ marginTop: 28 }}>
       <summary>Technical details</summary>
       {(route.message || engine.message) && <p className="connection-coverage">{engine.status === 'failed' ? engine.message : route.message}</p>}
       <dl className="connection-list">
-        <div><dt>Network</dt><dd>Ethereum Sepolia{route.blockNumber !== undefined ? ` · block ${route.blockNumber.toLocaleString()}` : ''}</dd></div>
-        <div><dt>Worker</dt><dd>Nym via Anon-RPC</dd></div>
+        <div><dt>Network</dt><dd>Ethereum Sepolia{route.blockNumber !== undefined ? ` · connection checked at block ${route.blockNumber.toLocaleString()}` : ''}</dd></div>
+        <div><dt>Worker</dt><dd>{networkLabel} via Anon-RPC</dd></div>
         <div><dt>RPC requests</dt><dd>{route.stats.completed}/{route.stats.attempted} completed through worker · {route.stats.failed} failed</dd></div>
         <div><dt>RPC read calls</dt><dd>{readCalls.completed}/{readCalls.attempted} transport replies · {readCalls.failed} failed</dd></div>
         <div><dt>Signed broadcasts</dt><dd>{broadcasts.completed}/{broadcasts.attempted} transport replies · {broadcasts.failed} failed</dd></div>
         <div><dt>Worker bootstrap</dt><dd>{route.stats.bootstrapReads} direct specifier reads</dd></div>
         <div><dt>Other page requests</dt><dd>POI {traffic.counts.poi ?? 0} direct · artifacts {traffic.counts.artifacts ?? 0} direct · indexer {traffic.counts.indexer ?? 0} direct · blocked {traffic.counts.blocked ?? 0}</dd></div>
-        <div><dt>RAILGUN</dt><dd>{engine.status === 'ready' ? route.status === 'ready' ? `Connected · shield fee ${engine.shieldFeeBasisPoints?.toString()} basis points` : 'Paused until the private route reconnects' : engine.status === 'starting' ? 'Connecting' : engine.status === 'failed' ? `Error: ${engine.message}` : 'Waiting for private route'}</dd></div>
+        {context === 'payments' && <div><dt>RAILGUN</dt><dd>{engine.status === 'ready' ? route.status === 'ready' ? `Connected · shield fee ${engine.shieldFeeBasisPoints?.toString()} basis points` : 'Paused until the private route reconnects' : engine.status === 'starting' ? 'Connecting' : engine.status === 'failed' ? `Error: ${engine.message}` : 'Waiting for private route'}</dd></div>}
       </dl>
       <details><summary>RPC methods observed</summary><ul>{methods.map(([method, count]) =>
         <li key={method}><code>{method}</code>: {count.completed}/{count.attempted} transport replies · {count.failed} failed</li>
       )}</ul><p>Calls inside a batch are counted separately. A transport reply does not establish RPC success or transaction settlement. No addresses or request contents are retained here.</p></details>
-      <p className="connection-coverage">The counters record requests observed through the worker; a broadcast is counted only when it is attempted. The worker lookup, privacy checks, proof downloads and indexer requests are direct. This panel counts page fetch and XHR, not traffic inside the worker, browser-native loads, or a connected wallet extension. A successful request alone does not prove anonymity.</p>
+      <p className="connection-coverage">{context === 'lending' ? 'Address-bearing position reads use the worker. Lending does not start RAILGUN, POI services or an address indexer. Initial page assets, the worker bundle and its onchain bootstrap lookup load outside that route. This panel observes page fetch/XHR, not worker internals, browser traffic or your entire device. A successful response alone is not proof of anonymity.' : 'The counters record requests observed through the worker; a broadcast is counted only when it is attempted. The worker lookup, privacy checks, proof downloads and indexer requests are direct. This panel counts page fetch and XHR, not traffic inside the worker, browser-native loads, or a connected wallet extension. A successful request alone does not prove anonymity.'}</p>
       <div className="traffic-recent"><h3>Recent page destinations</h3><ul>{traffic.recent.map((entry, index) => <li key={`${index}-${entry.host}`}><span>{entry.kind}</span><code>{entry.host}</code><span>{entry.outcome}</span></li>)}</ul></div>
-      {route.status === 'ready' && engine.status === 'ready' && <button type="button" onClick={onDisconnect}>Disconnect private route</button>}
+      {route.status === 'ready' && (context === 'lending' || engine.status === 'ready') && <button type="button" onClick={onDisconnect}>Disconnect private route</button>}
       </details>
     </aside>
   </div>

@@ -2,7 +2,7 @@ import { createBrowserDatabase, protectNamespaceReads } from './browser-database
 import { Buffer } from 'buffer'
 import type { SnarkJSGroth16 } from '@railgun-community/wallet'
 import { APP_RPC_URL, type PrivateRpc } from '../rpc'
-import { bindEthersToPrivateRoute } from '../rpc/ethers-transport'
+import { assertPrivateRouteReady } from '../rpc/ethers-transport'
 import { createBrowserArtifactStore } from './artifact-store'
 import { checkSepoliaPoi, POI_NODE_URL } from './poi'
 
@@ -19,7 +19,10 @@ export function startSepoliaEngine(route: PrivateRpc) {
 }
 
 async function initialize(route: PrivateRpc) {
-  bindEthersToPrivateRoute(route)
+  // App owns transport validation. Late SDK startup must not upgrade a newer
+  // connection's block-only probe into permission to send account reads.
+  if (route.status !== 'ready') throw new Error('Private route is unavailable. Reconnect before starting the wallet.')
+  assertPrivateRouteReady()
   await checkSepoliaPoi()
   ;(globalThis as typeof globalThis & { Buffer?: typeof Buffer }).Buffer = Buffer
   const [{ startRailgunEngine, loadProvider, unloadProvider, stopRailgunEngine, getProver, getEngine }, { NetworkName }, { groth16 }] = await Promise.all([
