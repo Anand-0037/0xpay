@@ -6,6 +6,7 @@ import { config } from './index.ts'
 import { assertUnlockedSession, unlockedEncryptionKey, unlockedSessionVersion, unlockedWalletId } from '../wallet/lifecycle.ts'
 import { keccak256, toHex, type Hex } from 'viem'
 import type { PreparedPayment } from './payment-records.ts'
+import { NOTE_VALUE, verifyDepositReceipt, type PaymentReceipt } from './payment-records.ts'
 export type NoteStatus = 'pending-deposit' | 'unspent' | 'spending' | 'spent'
 export type StoredNote = { note: Note; status: NoteStatus; source?: 'link'; txHash?: `0x${string}`; pending?: PreparedPayment }
 const prefix = '0xpay.notes.v1.'
@@ -14,6 +15,27 @@ export type NoteSession = { id: string; version: number }
 export function captureNoteSession(): NoteSession { return { id: unlockedWalletId(), version: unlockedSessionVersion() } }
 export function assertNoteSession(session: NoteSession) { assertUnlockedSession(session.id, session.version) }
 function storageKey(session: NoteSession) { return prefix + session.id }
+function claimLockName(note: Note, session: NoteSession) { return `0xpay.claim.${session.id}.${note.chainId}.${note.pool.toLowerCase()}.${note.commitment.toLowerCase()}` }
+/** Hold a separate cross-tab lock until the signed intent is persisted or the
+ * operation ends. Reconciliation must not free a note while a proof is active. */
+export function withClaimReservation<T>(note: Note, session: NoteSession, operation: () => Promise<T>): Promise<T> {
+  assertNoteSession(session)
+  if (typeof navigator === 'undefined' || !navigator.locks) return operation()
+  return navigator.locks.request(claimLockName(note, session), async () => {
+    assertNoteSession(session)
+    return operation()
+  })
+}
+function withIdleClaimReservation<T>(note: Note, session: NoteSession, operation: () => Promise<T>): Promise<T | undefined> {
+  // Without Web Locks, another tab could still be generating a proof. Keep
+  // orphaned reservations unavailable rather than risk a duplicate payment.
+  if (typeof navigator === 'undefined' || !navigator.locks) return Promise.resolve(undefined)
+  return navigator.locks.request(claimLockName(note, session), { ifAvailable: true }, async lock => {
+    if (!lock) return undefined
+    assertNoteSession(session)
+    return operation()
+  })
+}
 function bytes(hex: string) { return Uint8Array.from(hex.match(/../g)!.map(x => parseInt(x, 16))) }
 async function key(session: NoteSession) {
   assertNoteSession(session)
@@ -93,7 +115,7 @@ export async function reconcileNotes(transport: RpcTransport, session = captureN
   assertNoteSession(session)
   const claimed = await claimedNullifiers(transport)
   assertNoteSession(session)
-  return mutateStoredNotes(current => {
+  await mutateStoredNotes(current => {
     for (const entry of current) {
       // Absence from a later RPC response cannot resurrect a spent note, and
       // this pool's reconciliation must not change another pool's records.
@@ -108,4 +130,33 @@ export async function reconcileNotes(transport: RpcTransport, session = captureN
       entry.status = claimed.has(nullifierHash.toLowerCase()) ? 'spent' : entry.status === 'spending' ? 'spending' : 'unspent'
     }
   }, session)
+  // A claim cannot be broadcast until its signed hash and pending intent have
+  // been persisted together. An interrupted proof leaves only the old deposit
+  // hash (or no hash for an imported note). Hold the per-note lock while
+  // confirming and releasing it; an active proof or unknown hash stays reserved.
+  for (const entry of notes) {
+    if (entry.status !== 'spending' || entry.pending || entry.note.chainId !== config.chainId
+      || entry.note.pool.toLowerCase() !== config.pool.toLowerCase()) continue
+    const deposit = logs.find(log => log.commitment.toLowerCase() === entry.note.commitment.toLowerCase())
+    const nullifierHash = `0x${hash(entry.note.nullifier).toString(16).padStart(64, '0')}`
+    if (!deposit || claimed.has(nullifierHash.toLowerCase())) continue
+    await withIdleClaimReservation(entry.note, session, async () => {
+      if (entry.txHash) {
+        const receipt = await rpc<PaymentReceipt | null>(config.mempoolRpc, 'eth_getTransactionReceipt', [entry.txHash], transport)
+        assertNoteSession(session)
+        if (!receipt) return
+        try {
+          const verified = verifyDepositReceipt(receipt, { operation: 'deposit', txHash: entry.txHash,
+            chainId: entry.note.chainId, pool: entry.note.pool, sender: receipt.from,
+            commitment: entry.note.commitment, nonce: 0, amountWei: String(NOTE_VALUE) })
+          if (verified.leafIndex !== deposit.leafIndex) return
+        } catch { return /* A claim or unverified hash stays reserved. */ }
+      }
+      await mutateStoredNotes(current => {
+        const latest = current.find(value => noteId(value) === noteId(entry))
+        if (latest?.status === 'spending' && !latest.pending && latest.txHash === entry.txHash) latest.status = 'unspent'
+      }, session)
+    })
+  }
+  return listStoredNotes(session)
 }

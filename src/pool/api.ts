@@ -1,7 +1,7 @@
 import { encodeFunctionData, isAddress, keccak256, toHex, type Hex } from 'viem'
 import { claim, config, confirmClaimPayment, hash, createNote, deposit, encodeNoteLink, decodeNoteLink, getBalance, type ClaimStep, type Note, type RpcTransport } from './index.ts'
 import { rpc } from './network.ts'
-import { assertNoteSession, captureNoteSession, listStoredNotes, mutateStoredNotes, reconcileNotes, type StoredNote, type NoteSession } from './notes.ts'
+import { assertNoteSession, captureNoteSession, listStoredNotes, mutateStoredNotes, reconcileNotes, withClaimReservation, type StoredNote, type NoteSession } from './notes.ts'
 import { unlockedFundingWallet } from '../wallet/lifecycle.ts'
 import { privateTransport } from './transport.ts'
 import { mayRestoreRejectedClaim } from './claim-recovery.ts'
@@ -83,8 +83,9 @@ export function createPoolApi(route: PrivateRpc) {
       if (!isAddress(to) || notes.length < 1) throw new Error('Invalid recipient or notes')
       const session = captureNoteSession()
       const operationTransport = sessionTransport(session)
-      const results = []
+      const results: Awaited<ReturnType<typeof claim>>[] = []
       for (const note of notes) {
+        await withClaimReservation(note, session, async () => {
         assertNoteSession(session)
         const reserved = await mutateStoredNotes(stored => {
           const entry = stored.find(x => x.note.commitment === note.commitment)
@@ -149,6 +150,7 @@ export function createPoolApi(route: PrivateRpc) {
           spent.status = 'spent'; spent.txHash = result.txHash; delete spent.pending
         }, session)
         results.push(result)
+        })
       }
       return results
     },

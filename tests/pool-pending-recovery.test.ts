@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import { afterEach, beforeEach, test } from 'node:test'
 import { webcrypto } from 'node:crypto'
 import { encodeAbiParameters, encodeEventTopics, keccak256, toHex, type Hex } from 'viem'
-import { createLocalWallet, lockLocalWallet } from '../src/wallet/lifecycle.ts'
+import { createLocalWallet, lockLocalWallet, unlockLocalWallet } from '../src/wallet/lifecycle.ts'
 import { createPoolApi } from '../src/pool/api.ts'
 import { config, createNote, hash } from '../src/pool/index.ts'
-import { listStoredNotes, reconcileNotes, saveStoredNotes } from '../src/pool/notes.ts'
+import { captureNoteSession, listStoredNotes, reconcileNotes, saveStoredNotes, withClaimReservation } from '../src/pool/notes.ts'
 import { claimEvent, depositEvent, nativeTransferEvent, NATIVE_TRANSFER_ADDRESS, NOTE_VALUE, type ClaimIntent, type DepositIntent, type PaymentReceipt } from '../src/pool/payment-records.ts'
 import type { PrivateRpc } from '../src/rpc.ts'
 
@@ -15,6 +15,19 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
   setItem: (key: string, value: string) => { storage.set(key, value) },
 } })
 Object.defineProperty(globalThis, 'crypto', { configurable: true, value: webcrypto })
+const heldLocks = new Set<string>()
+Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: {
+  request: async (name: string, optionsOrCallback: { ifAvailable?: boolean } | ((lock: object | null) => Promise<unknown>), callback?: (lock: object | null) => Promise<unknown>) => {
+    const options = typeof optionsOrCallback === 'function' ? undefined : optionsOrCallback
+    const run = typeof optionsOrCallback === 'function' ? optionsOrCallback : callback!
+    if (heldLocks.has(name)) {
+      if (options?.ifAvailable) return run(null)
+      throw new Error('Test lock is already held')
+    }
+    heldLocks.add(name)
+    try { return await run({ name }) } finally { heldLocks.delete(name) }
+  },
+} } })
 const txHash = `0x${'a'.repeat(64)}` as Hex
 const blockHash = `0x${'b'.repeat(64)}` as Hex
 const sender = `0x${'1'.repeat(40)}` as Hex
@@ -41,7 +54,7 @@ function routeFor(receipt: PaymentReceipt | null, options: { down?: boolean; spe
   } } as unknown as PrivateRpc
   return { route, methods }
 }
-beforeEach(async () => { await lockLocalWallet(); storage.clear(); await createLocalWallet('disposable test password', 0) })
+beforeEach(async () => { heldLocks.clear(); await lockLocalWallet(); storage.clear(); await createLocalWallet('disposable test password', 0) })
 afterEach(async () => { await lockLocalWallet() })
 
 test('lost deposit response survives reload, stays reserved until exact receipt, then verifies once', async () => {
@@ -112,4 +125,58 @@ test('ordinary reconciliation cannot release an exact pending intent but updates
   assert.equal(records[0].status, 'pending-deposit')
   assert.equal(records[0].pending?.txHash, txHash)
   assert.equal(records[1].status, 'unspent')
+})
+
+test('an interrupted pre-broadcast claim releases only a proven deposit reservation after reload', async () => {
+  const note = createNote(config.pool, config.chainId)
+  const depositLog = { address: config.pool,
+    topics: encodeEventTopics({ abi: [depositEvent], args: { commitment: note.commitment } }) as Hex[],
+    data: encodeAbiParameters([{ type: 'uint32' }, { type: 'uint256' }], [0, 1n]) }
+  const depositReceipt: PaymentReceipt = { transactionHash: txHash, blockHash, blockNumber: '0x7', status: '0x1', from: sender, to: config.pool, logs: [depositLog] }
+  const depositTopic = keccak256(new TextEncoder().encode('Deposit(bytes32,uint32,uint256)'))
+  const transport = async (_url: string, body: unknown) => {
+    const request = body as { id: number; method: string; params: unknown[] }
+    const result = request.method === 'eth_getLogs'
+      ? (request.params[0] as { topics: Hex[] }).topics[0] === depositTopic ? [depositLog] : []
+      : request.method === 'eth_getTransactionReceipt' ? depositReceipt : undefined
+    if (result === undefined) throw new Error(`Unexpected RPC ${request.method}`)
+    return { jsonrpc: '2.0', id: request.id, result }
+  }
+  await saveStoredNotes([{ note, status: 'spending', txHash }])
+  await lockLocalWallet()
+  await unlockLocalWallet('disposable test password')
+  assert.equal((await listStoredNotes())[0].status, 'spending')
+  await withClaimReservation(note, captureNoteSession(), async () => {
+    await reconcileNotes(transport)
+    assert.equal((await listStoredNotes())[0].status, 'spending', 'active proof must retain its reservation')
+  })
+  await reconcileNotes(transport)
+  const recovered = (await listStoredNotes())[0]
+  assert.equal(recovered.status, 'unspent')
+  assert.equal(recovered.txHash, txHash)
+  assert.equal(recovered.pending, undefined)
+})
+
+test('a spending note with an unknown claim hash or mismatched receipt remains reserved', async () => {
+  const note = createNote(config.pool, config.chainId)
+  const depositLog = { address: config.pool,
+    topics: encodeEventTopics({ abi: [depositEvent], args: { commitment: note.commitment } }) as Hex[],
+    data: encodeAbiParameters([{ type: 'uint32' }, { type: 'uint256' }], [0, 1n]) }
+  const depositTopic = keccak256(new TextEncoder().encode('Deposit(bytes32,uint32,uint256)'))
+  const transport = (receipt: PaymentReceipt | null) => async (_url: string, body: unknown) => {
+    const request = body as { id: number; method: string; params: unknown[] }
+    const result = request.method === 'eth_getLogs'
+      ? (request.params[0] as { topics: Hex[] }).topics[0] === depositTopic ? [depositLog] : []
+      : request.method === 'eth_getTransactionReceipt' ? receipt : undefined
+    if (result === undefined) throw new Error(`Unexpected RPC ${request.method}`)
+    return { jsonrpc: '2.0', id: request.id, result }
+  }
+  await saveStoredNotes([{ note, status: 'spending', txHash }])
+  await reconcileNotes(transport(null))
+  assert.equal((await listStoredNotes())[0].status, 'spending')
+  const wrongReceipt: PaymentReceipt = { transactionHash: txHash, blockHash, blockNumber: '0x7', status: '0x1', from: sender, to: config.pool, logs: [] }
+  await reconcileNotes(transport(wrongReceipt))
+  assert.equal((await listStoredNotes())[0].status, 'spending')
+  await assert.rejects(reconcileNotes(async () => { throw new Error('Private route disconnected') }), /Private route disconnected/)
+  assert.equal((await listStoredNotes())[0].status, 'spending')
 })
