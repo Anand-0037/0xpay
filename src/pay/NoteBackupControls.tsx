@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type Ref } from 'react'
 import type { PayApi } from './types'
 
 /** Passwords and files stay in this mounted dialog; only encrypted JSON is downloaded. */
-export default function NoteBackupControls({ api, paymentBusy, onRestored }: { api: PayApi; paymentBusy: boolean; onRestored: () => void }) {
+export default function NoteBackupControls({ api, paymentBusy, onRestored, triggerRef }: { api: PayApi; paymentBusy: boolean; onRestored: () => void; triggerRef?: Ref<HTMLButtonElement> }) {
   const dialog = useRef<HTMLDialogElement>(null)
   const lifecycle = useRef({ version: 0 })
   const [mode, setMode] = useState<'export' | 'restore'>('export')
@@ -61,7 +61,7 @@ export default function NoteBackupControls({ api, paymentBusy, onRestored }: { a
     } finally { if (lifecycle.current.version === ticket) setWorking(false) }
   }
   return <>
-    <button type="button" disabled={paymentBusy} onClick={open}>Back up / restore notes</button>
+    <button ref={triggerRef} type="button" disabled={paymentBusy} onClick={open}>Back up / restore notes</button>
     <dialog ref={dialog} aria-labelledby="note-backup-title" onCancel={event => { if (working) event.preventDefault(); else clear() }} style={{ width: 'min(92vw, 560px)', maxHeight: '90vh', overflow: 'auto', padding: '28px', borderRadius: '18px', border: '1px solid var(--px-line)', background: 'var(--px-surface)', color: 'var(--px-ink)' }}>
       <h2 id="note-backup-title" style={{ margin: '0 0 12px', fontSize: '25px' }}>Private-note backup</h2>
       <p style={{ fontSize: '14px', lineHeight: 1.6, color: 'var(--px-muted)' }}>Recovery words restore your wallet address, not its private notes. Save an encrypted note backup separately. Restore it after unlocking the original wallet.</p>
