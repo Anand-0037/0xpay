@@ -1,7 +1,7 @@
 {
   "chainId": 1337,
   "ethrexRpc": "https://altmempool.forshtat.com",
-  "mempoolRpc": "https://altmempoolgateway.forshtat.com/rpc",
+  "mempoolRpc": "https://altmempool.forshtat.com/rpc",
   "explorer": "https://explorer.altmempool.wtf/",
   "pool": "0xf409d9a52cd9b8c61a44cc8c9cdef0d85b58259c",
   "poseidon": "0x3c913baa92e0bab4b6a56782f305dc62414298b0",

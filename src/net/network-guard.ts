@@ -1,6 +1,6 @@
 // Page fetch/XHR guard. Worker traffic is outside this page and counted by PrivateRpc.
 import { APP_RPC_URL, LOCAL_RPC_URL, LOCAL_MEMPOOL_URL, MEMPOOL_RPC_URL, PRIVACY_NETWORKS, workerBootstrapParams, type PrivacyNetwork } from '../rpc/networks.ts'
-export type TrafficKind = 'app-static' | 'bootstrap' | 'worker-bundle' | 'poi' | 'artifacts' | 'indexer' | 'blocked'
+export type TrafficKind = 'app-static' | 'bootstrap' | 'worker-bundle' | 'artifacts' | 'blocked'
 export type TrafficEntry = Readonly<{ kind: TrafficKind; host: string; outcome: 'sent' | 'failed' | 'blocked' }>
 const counts = new Map<TrafficKind, number>()
 const recent: TrafficEntry[] = []
@@ -13,7 +13,7 @@ function validBootstrap(body: unknown, network: PrivacyNetwork) {
   if (typeof body !== 'string') return false
   try { const x = JSON.parse(body); return x?.jsonrpc === '2.0' && Number.isSafeInteger(x.id) && workerBootstrapParams({ method: x.method, params: x.params }, network) !== null } catch { return false }
 }
-export function classifyOutgoingRequest(raw: string, method: string, body: unknown, appOrigin: string, resolvers: ReadonlySet<string> = bundleUrls, _paymentServices = false, privacyNetwork: PrivacyNetwork = 'nym'): TrafficKind {
+export function classifyOutgoingRequest(raw: string, method: string, body: unknown, appOrigin: string, resolvers: ReadonlySet<string> = bundleUrls, privacyNetwork: PrivacyNetwork = 'nym'): TrafficKind {
   let url: URL
   try { url = new URL(raw, appOrigin) } catch { return 'blocked' }
   if (url.origin === appOrigin && method.toUpperCase() === 'GET' && !url.search) return 'app-static'
@@ -22,13 +22,13 @@ export function classifyOutgoingRequest(raw: string, method: string, body: unkno
   if ([APP_RPC_URL, MEMPOOL_RPC_URL, 'https://altmempool.forshtat.com/rpc', LOCAL_RPC_URL, LOCAL_MEMPOOL_URL].includes(url.href)) return 'blocked'
   return 'blocked'
 }
-export function installNetworkGuard({ privacyNetwork = 'nym' }: { paymentServices?: boolean; privacyNetwork?: PrivacyNetwork } = {}) {
+export function installNetworkGuard({ privacyNetwork = 'nym' }: { privacyNetwork?: PrivacyNetwork } = {}) {
   if (installed || typeof window === 'undefined') return
   installed = true
   const originalFetch = globalThis.fetch.bind(globalThis)
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const raw = input instanceof Request ? input.url : String(input), method = init?.method ?? (input instanceof Request ? input.method : 'GET')
-    const kind = classifyOutgoingRequest(raw, method, init?.body, window.location.origin, bundleUrls, false, privacyNetwork), host = new URL(raw, window.location.href).host
+    const kind = classifyOutgoingRequest(raw, method, init?.body, window.location.origin, bundleUrls, privacyNetwork), host = new URL(raw, window.location.href).host
     if (kind === 'blocked') { record(kind, host, 'blocked'); throw new Error(`Network guard blocked ${host}`) }
     try { const response = await originalFetch(input, { ...init, redirect: 'error' }); record(kind, host, response.ok ? 'sent' : 'failed'); return response } catch (error) { record(kind, host, 'failed'); throw error }
   }
@@ -43,7 +43,7 @@ export function installNetworkGuard({ privacyNetwork = 'nym' }: { paymentService
   XMLHttpRequest.prototype.send = function(body?: Document | XMLHttpRequestBodyInit | null) {
     const request = requests.get(this)
     if (!request) throw new Error('Network guard saw XHR without open')
-    const kind = classifyOutgoingRequest(request.raw, request.method, body, window.location.origin, bundleUrls, false, privacyNetwork)
+    const kind = classifyOutgoingRequest(request.raw, request.method, body, window.location.origin, bundleUrls, privacyNetwork)
     const host = new URL(request.raw, window.location.href).host
     if (kind === 'blocked') { record(kind, host, 'blocked'); throw new Error(`Network guard blocked ${host}`) }
     this.addEventListener('loadend', () => record(kind, host, this.status >= 200 && this.status < 300 ? 'sent' : 'failed'), { once: true })

@@ -152,7 +152,7 @@ export async function claim(note: Note, opts: { recipientKey?: Hex; recipient?: 
   if (index < 0) throw new Error('Note commitment not deposited');
   const tree = merkle(leaves, index), nullifierHash = hash(note.nullifier);
   const maxFeePerGas = 2_000_000_000n;
-  const paymentGas = 600_000n, senderGas = 300_000n, senderState = 200_000n;
+  const paymentGas = 600_000n, senderGas = 500_000n, senderState = 500_000n;
   // The sidecar's max cost also includes intrinsic/signature gas; allow 50k for those plus 0.5 mETH margin.
   const fee = (30_000n + paymentGas + senderGas + senderState + 50_000n) * maxFeePerGas + 500_000_000_000_000n;
   const started = performance.now();

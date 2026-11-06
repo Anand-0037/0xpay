@@ -5,7 +5,7 @@ import type { Address, Hex } from 'viem';
 
 export const profile = getProfile('ethrex-eip8141-tracer');
 const local = typeof process !== 'undefined' && process.env.OXPAY_NETWORK === 'local';
-export const GATEWAY = local ? 'http://127.0.0.1:13000/rpc' : 'https://altmempoolgateway.forshtat.com/rpc';
+export const GATEWAY = local ? 'http://127.0.0.1:13000/rpc' : 'https://altmempool.forshtat.com/rpc';
 export const ETHREX = local ? 'http://127.0.0.1:10545' : 'https://altmempool.forshtat.com';
 export const EXPLORER = local ? 'http://127.0.0.1:13000/' : 'https://explorer.altmempool.wtf/';
 export type RpcTransport = (url: string, body: unknown) => Promise<unknown>;
