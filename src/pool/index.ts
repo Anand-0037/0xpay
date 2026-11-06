@@ -154,7 +154,9 @@ export async function claim(note: Note, opts: { recipientKey?: Hex; recipient?: 
   assertNoteDomain(note);
   const key = opts.recipientKey ?? generatePrivateKey();
   const { sender, recipient } = claimAddresses(key, opts.recipient);
-  opts.onStep({ kind: 'key', address: sender, balanceWei: await getBalance(sender, opts.transport) });
+  const senderBalance = await getBalance(sender, opts.transport);
+  opts.onStep({ kind: 'key', address: sender, balanceWei: senderBalance });
+  if (senderBalance !== 0n) throw new Error('Claim account is funded; use a fresh zero-ETH account before continuing');
   const { leaves, logs } = await syncDeposits(note.pool, opts.transport);
   opts.onStep({ kind: 'sync', leaves: leaves.length });
   const index = logs.findIndex(x => x.commitment.toLowerCase() === note.commitment.toLowerCase());
