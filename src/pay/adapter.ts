@@ -9,6 +9,11 @@ export function adaptPoolApi(pool: PoolApi): PayApi {
     getPublicBalance: () => pool.getPublicBalance(address()),
     getPrivateBalance: () => pool.getPrivateBalance(),
     listNotes: async () => (await pool.listNotes()).map(entry => ({ commitment: entry.note.commitment, spent: entry.status !== 'unspent' })),
+    exportNoteBackup: pool.exportNoteBackup,
+    restoreNoteBackup: pool.restoreNoteBackup,
+    getClaimQuote: pool.getClaimQuote,
+    getDepositQuote: pool.getDepositQuote,
+    checkPendingPayment: pool.checkPendingPayment,
     depositNotes: (count, onStep) => pool.depositNotes(count, step => {
       if (step.kind === 'included' && typeof step.blockNumber === 'bigint' && typeof step.txHash === 'string') {
         onStep({ kind: 'included', blockNumber: step.blockNumber, txHash: step.txHash as `0x${string}`, explorerUrl: 'https://explorer.altmempool.wtf/' })
@@ -31,7 +36,7 @@ export function adaptPoolApi(pool: PoolApi): PayApi {
     },
     claimLink: (link, onStep) => pool.claimLink(link, onStep),
     tokenPortfolio: async () => (await pool.tokenPortfolio(address())).map(token => ({ symbol: token.symbol, balance: token.balance })),
-    activity: async () => (await pool.activity()).map(item => ({ id: item.commitment, title: item.status, txHash: item.txHash })),
+    activity: async () => (await pool.activity()).map(item => ({ id: item.commitment, title: item.status, kind: item.status, txHash: item.txHash, pending: item.pending, operation: item.operation })),
     route: () => ({ kind: 'unknown', worker: null, calls: null, direct: null }),
   }
 }
