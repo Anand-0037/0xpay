@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "npm run check:core && vite build && node scripts/alias-wallet-route.mjs",
+    "dev": "node init && vite",
+    "build": "node init && npm run check:core && vite build && node scripts/alias-wallet-route.mjs",
     "lint": "oxlint",
     "test": "tsx --tsconfig tsconfig.app.json --test tests/*.test.ts",
     "preview": "vite preview",

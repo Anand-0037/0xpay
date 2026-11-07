@@ -1,14 +1,20 @@
 # 0xPay
 
-[Open the wallet](https://0xpay.fun/) · [Transaction evidence](protocol/EVIDENCE.md)
+**Pay from a private note. Route your wallet queries through Anon-RPC.**
 
-0xPay is a privacy wallet on the alt-mempool devnet. It combines two protections: a fixed-note pool for payments and Anon-RPC for blockchain requests. A recipient can receive a payout at a fresh address with **zero ETH**; the pool pays the transaction fee.
+0xPay is a devnet wallet for paying someone without making a direct onchain transfer from your funding address to their address. You deposit a fixed 0.1 test ETH note, then your browser proves it can spend a note from the pool. A fresh account with zero ETH submits the claim; the pool covers gas and sends the payout.
 
-## The problem
+Supported blockchain requests use Anon-RPC’s Nox worker by default. If that route fails, those requests stop. The RPC still sees what is queried, and the deposit, recipient, payout amount and timing remain public. A small pool and close timing can make the deposit and payout easier to correlate.
 
-A normal wallet asks an RPC provider about addresses and transactions from the user's network connection. The provider can associate those requests with an IP address. A normal transfer also exposes the sender and requires the recipient to have gas for a later move. 0xPay reduces the first link for routed requests and uses a proof-backed pool to change the payment path. It does **not** hide every part of a transaction or make the user anonymous to every service.
+[Open the wallet](https://0xpay.fun/) · [See an included payment](https://explorer.altmempool.wtf/tx/0x6d24a75bc4c788c618f918b80131d8259ce32e05790e4ee6b639eddb3c807f76?node=https%3A%2F%2Faltmempool.forshtat.com%2Frpc) · [Detailed evidence](protocol/EVIDENCE.md)
 
-## What the app does
+## Try 0xPay
+
+**Inspect privately, no wallet needed:** Open **Private lookup** and check a devnet address or transaction through Nox. The onchain data remains public. If the route disconnects or fails, new supported reads stop rather than using direct RPC.
+
+**Make a devnet payment:** Create a disposable wallet and use **Get 1 devnet ETH from faucet** under **Add to private balance** if needed. Deposit one fixed **0.1 ETH** note and export its **encrypted note backup**. In a clean browser, restore the wallet words **and** import that backup; wallet words alone do not restore notes. Review the recipient, fee and payout, submit once, then wait for inclusion and check the recipient balance. Reload to confirm the note remains spent. If submission is uncertain, check the existing transaction before retrying.
+
+## How it works
 
 1. Deposit 0.1 devnet ETH into the pool. The deposit is public. The browser stores the resulting note encrypted; recovery words alone cannot restore notes, so export a separate encrypted note backup.
 2. Send a note to a recipient. The browser creates a Groth16 proof that binds the pool root, note nullifier, recipient and fee. A fresh zero-ETH key submits the frame transaction. The staked pool verifies the proof, pays gas and pays the recipient.
@@ -24,20 +30,23 @@ Browser: encrypted note + local proof
 
 ## Evidence
 
-A hosted browser run on [0xpay.fun](https://0xpay.fun/) completed a 0.1 devnet ETH deposit, encrypted note backup, fresh-profile restore and private send through Nox. [The claim](https://explorer.altmempool.wtf/tx/0x0aace393ed7d593fc01707901cfe2f09cbce59befead4db802816b7bd3251d72?node=https%3A%2F%2Faltmempool.forshtat.com%2Frpc) was included in block 6078; a previously empty recipient received **0.09614 devnet ETH** after a **0.00386 ETH** claim fee. The canonical mempool rejected the validation prefix; the normal alternative mempool admitted it. After reload, the restored wallet showed **0 unspent notes**. [Transaction evidence and limits](protocol/EVIDENCE.md).
+The earlier hosted browser run completed the deposit → encrypted backup → clean-profile restore → payment journey. A fresh run on 7 November used an existing funded note and completed a new payment through Nox. Its claim was **included in block 12396**; the app reported **0.09614 devnet ETH** at the recipient and **0 unspent notes** afterward. This fresh run did not repeat deposit or restore, and a later standalone lookup failed with `NoTunnelExitError`; the app then blocked further reads.
 
-[Hosted payment screen](media/hosted-payment-2026-11-06.png) — the actual browser review, canonical rejection, alternative admission, inclusion and recipient balance. The screenshot supports the walkthrough; the transaction receipt above is the onchain evidence.
+| Checkpoint | Observed evidence |
+| --- | --- |
+| Deposit | Earlier hosted run deposited one 0.1 devnet ETH note. |
+| Restored note | Earlier run restored the separate encrypted backup in a fresh browser profile. |
+| Claim included | Fresh claim `0x6d24a75b…807f76`, block 12396; miner explorer status **On chain**. |
+| Recipient paid | Fresh run: 0.09614 devnet ETH after the reviewed 0.00386 ETH claim fee. |
+| Note spent | Fresh run showed 0 unspent notes; earlier run also verified this after reload. |
+
+The ordinary mempool rejected the fresh claim’s validation prefix; the normal alternative sidecar admitted it. The explorer showed the miner had included it while the gateway had not seen it. [Transaction evidence and limits](protocol/EVIDENCE.md) contains the earlier complete recovery run.
+
+[Hosted payment screen](media/hosted-payment-2026-11-06.png) — the actual browser review, canonical rejection, alternative admission, inclusion and recipient balance. This screenshot is from the earlier payment in block 6078; the linked evidence file records that run.
 
 [Private lookup screen](media/private-lookup-2026-11-07.png) — a wallet-free read of the deployed pool address through Nox at devnet block 8169. This shows the app result, not proof that every network request is anonymous.
 
 Nox connection can time out; one fresh reload needed a second attempt. This run does not prove every browser or worker can complete the flow. The devnet can reset and erase explorer history. A receipt shows inclusion, not chain finality.
-
-## Try a payment
-
-1. Open the wallet on two clean browser profiles. In A, create a disposable devnet wallet and save its recovery words privately. Request devnet ETH in **Add to private balance** if needed, then deposit one 0.1 ETH note.
-2. Download the **encrypted note backup** after deposit. In B, restore the same recovery words and import that backup. Wait for the note to become spendable; the recovery words alone do not restore it.
-3. Choose a fresh recipient address with zero devnet ETH. Review the fee and payout in B, then submit **once**. Wait for an included receipt and check the recipient balance.
-4. Reload B: the note should remain spent. If submission is uncertain, use **Check existing transaction** before attempting anything else. Keep recovery words, backups and payment links out of screenshots.
 
 ## Run and inspect
 

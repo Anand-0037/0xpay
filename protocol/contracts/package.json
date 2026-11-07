@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "forge build && node scripts/export-artifacts.mjs",
+    "build": "node init && forge build && node scripts/export-artifacts.mjs",
     "test": "forge test",
     "gas": "forge test --gas-report"
   },
