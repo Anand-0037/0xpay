@@ -247,7 +247,7 @@ export default function PayAppView({ api, connectionReady = true, connectionMess
             <p>This is a signed maximum. Actual gas may cost less.</p>
           </div>
           {depositStatus.shortfallWei > 0n && <p className="px-funding-shortfall" role="status">Add at least {formatEth(depositStatus.shortfallWei, 18)} devnet ETH to the address above.</p>}
-          {depositStatus.shortfallWei > 0n && api.requestDevnetFunds && <button type="button" className="px-button px-button-secondary" disabled={busy || !connectionReady || nymPaymentUnavailable} onClick={() => void requestDevnetFunds()}>Request 1 devnet ETH</button>}
+          {depositStatus.shortfallWei > 0n && api.requestDevnetFunds && <button type="button" className="px-button px-button-secondary" disabled={busy || !connectionReady || nymPaymentUnavailable} onClick={() => void requestDevnetFunds()}>Get 1 devnet ETH from faucet</button>}
           {fundingRequestStatus && <p role="status">{fundingRequestStatus}</p>}
           {depositStatus.reason && depositStatus.shortfallWei === 0n && <p role="status">{depositStatus.reason}</p>}
           {(dataErrors.publicBalance || dataErrors.activity) && <button type="button" className="px-button px-button-secondary" disabled={!connectionReady || busy} onClick={refresh}>Retry funding check</button>}
