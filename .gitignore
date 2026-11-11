@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
 !.env.example
 *.zip
 *.bundle
@@ -22,6 +24,7 @@ test-results/
 .vite/
 
 # Editor directories and files
+.vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
@@ -45,4 +48,3 @@ protocol/deployments/jwt.hex
 src/pool/deployments.local.json
 protocol/contracts/cache/
 protocol/contracts/out/
-config.bat
