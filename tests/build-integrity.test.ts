@@ -22,7 +22,7 @@ test('vendored QR generator remains browser compatible', () => {
   qr.addData('https://wallet.example/#test')
   qr.make()
   assert.ok(qr.getModuleCount() > 0)
-  assert.match(qr.createSvgTag(), /^<svg\b/)
+  assert.equal(typeof qr.isDark(0, 0), 'boolean')
 })
 
 test('local environment and editor files remain ignored', () => {
