@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
 !.env.example
 !.env.server.example
 *.zip
@@ -23,6 +25,7 @@ test-results/
 .vite/
 
 # Editor directories and files
+.vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
@@ -37,4 +40,3 @@ hack/
 STATUS.md
 BLOCKERS.md
 digest.txt
-config.bat
